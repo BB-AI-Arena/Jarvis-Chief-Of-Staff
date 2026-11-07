@@ -6,9 +6,6 @@ final class CloudVoice {
     var onState: ((String) -> Void)?
     var onText: ((String, String, Bool) -> Void)?
     var onLevel: ((Double) -> Void)?
-    var onInputLevel: ((Double) -> Void)?
-    private var outputActivity = VoiceActivity()
-    private var displayedState = ""
     var onFailure: ((String) -> Void)?
     var onDelegate: ((String, String, @escaping (String) -> Void) -> Void)?
     private let engine = AVAudioEngine()
@@ -41,7 +38,7 @@ final class CloudVoice {
         request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
         let network = URLSession(configuration: .ephemeral); self.network = network
         let ws = network.webSocketTask(with: request); socket = ws; ws.resume()
-        setState("connecting")
+        onState?("connecting")
         receiver = Task { [weak self] in
             do {
                 while !Task.isCancelled {
@@ -65,10 +62,6 @@ final class CloudVoice {
             self.fail("Streaming voice did not become ready in time.")
         }
     }
-    private func setState(_ state: String) {
-        guard displayedState != state else { return }
-        displayedState = state; onState?(state)
-    }
     private func write(_ event: [String: Any]) {
         guard !stopped, let data = try? JSONSerialization.data(withJSONObject: event), let text = String(data: data, encoding: .utf8), let ws = socket else { return }
         wire.async { [weak self] in
@@ -89,7 +82,7 @@ final class CloudVoice {
         case "session.started":
             guard !ready else { return }; ready = true
             do {
-                try startAudio(); setState("listening")
+                try startAudio(); onState?("listening")
                 if greeting { commentary("Greet the caller now. Say you are at their service, then listen.") }
             } catch { fail("The microphone or streaming audio output could not start.") }
         case "session.output_audio.delta":
@@ -103,7 +96,7 @@ final class CloudVoice {
                 userInput += text
                 let now = Date().timeIntervalSinceReferenceDate
                 if now-inputBurstAt > 0.65 { flushPlayback() }; inputBurstAt = now
-                setState("listening")
+                onState?("listening")
             }
         case "session.delegation.created":
             guard let delegation = event["delegation"] as? [String: Any], let id = delegation["id"] as? String, handledDelegations.insert(id).inserted else { return }
@@ -135,11 +128,6 @@ final class CloudVoice {
         engine.attach(player); engine.connect(player, to: engine.mainMixerNode, format: outputFormat)
         try engine.inputNode.setVoiceProcessingEnabled(true)
         let inputFormat = engine.inputNode.outputFormat(forBus: 0)
-        NSLog("JarvisAudio input format: %@", inputFormat.description)
-        var meterAt: TimeInterval = 0
-        var reportAt: TimeInterval = 0
-        var peakInput: Double = 0
-        var inputFrames = 0
         guard inputFormat.sampleRate > 0, let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true), let converter = AVAudioConverter(from: inputFormat, to: pcmFormat) else { throw NSError(domain: "JarvisLive", code: 1) }
         engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self, !self.stopped, self.ready else { return }
@@ -150,25 +138,6 @@ final class CloudVoice {
                 if supplied { status.pointee = .noDataNow; return nil }; supplied = true; status.pointee = .haveData; return buffer
             }
             guard error == nil, converted.frameLength > 0, let samples = converted.int16ChannelData?[0] else { return }
-            var energy: Double = 0
-            for index in 0..<Int(converted.frameLength) {
-                let sample = Double(samples[index]) / 32768
-                energy += sample * sample
-            }
-            let rms = sqrt(energy / Double(converted.frameLength))
-            let now = ProcessInfo.processInfo.systemUptime
-            peakInput = max(peakInput, rms); inputFrames += Int(converted.frameLength)
-            if now - meterAt > 0.1 {
-                meterAt = now
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, !self.stopped else { return }
-                    self.onInputLevel?(min(1, rms * 12))
-                }
-            }
-            if now - reportAt > 5 {
-                NSLog("JarvisAudio captured frames=%d peakRMS=%.5f", inputFrames, peakInput)
-                reportAt = now; peakInput = 0; inputFrames = 0
-            }
             let data = Data(bytes: samples, count: Int(converted.frameLength) * 2)
             self.write(["type": "session.input_audio.append", "audio": data.base64EncodedString()])
         }
@@ -177,8 +146,7 @@ final class CloudVoice {
             var energy: Float = 0
             let count = Int(buffer.frameLength)
             for i in stride(from: 0, to: count, by: 8) { energy += samples[i]*samples[i] }
-            let rms = Double(sqrt(energy / Float(max(1,count/8))))
-            let level = min(1, rms * 5)
+            let level = min(1,Double(sqrt(energy / Float(max(1,count/8))))*5)
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, !self.stopped else { return }; self.onLevel?(level)
                 let now = Date().timeIntervalSinceReferenceDate
@@ -186,7 +154,7 @@ final class CloudVoice {
                     self.lastOutputActivity = now
                     if !self.speaking { self.speaking = true; self.onState?("speaking") }
                 } else if self.speaking, now-self.lastOutputActivity > 0.25 {
-                    self.speaking = false; self.setState("listening"); self.flushTranscript("assistant")
+                    self.speaking = false; self.onState?("listening"); self.flushTranscript("assistant")
                 }
             }
         }
@@ -223,9 +191,9 @@ final class CloudVoice {
         } }
         if !player.isPlaying { player.play() }
     }
-    private func flushPlayback() { playbackGeneration = UUID(); queuedBuffers = 0; speaking = false; player.stop(); outputActivity = VoiceActivity(); if captureRunning { player.play() }; onLevel?(0) }
+    private func flushPlayback() { playbackGeneration = UUID(); queuedBuffers = 0; speaking = false; player.stop(); if captureRunning { player.play() }; onLevel?(0) }
     func interrupt() {
-        flushPlayback(); setState("listening")
+        flushPlayback(); onState?("listening")
         write(["type": "session.instructions.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": "Stop speaking now and listen to the user's next input."])
     }
     func sendText(_ text: String) {
