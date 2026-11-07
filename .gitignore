@@ -1,0 +1,16 @@
+.build/
+.graphify/
+.voice/
+dist/
+node_modules/
+.DS_Store
+__pycache__/
+*.pyc
+.env
+.env.*
+*.log
+*.pem
+*.key
+auth.json
+credentials.json
+.agent-runtime-path

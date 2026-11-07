@@ -1,0 +1,4 @@
+Resources/vendor/* linguist-vendored=true
+Resources/vendor/presence.js -whitespace
+*.jpg binary
+*.icns binary

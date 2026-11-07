@@ -1,0 +1,76 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+let JSDOM;
+try { ({JSDOM}=require('jsdom')); } catch { ({JSDOM}=require('../.build/test-deps/node_modules/jsdom')); }
+const root = path.resolve(__dirname, '..');
+function workspace(mode) {
+  const dom = new JSDOM(fs.readFileSync(path.join(root, 'Resources/index.html'), 'utf8'), { url: 'https://jarvis.test/', runScripts: 'outside-only' });
+  const w = dom.window;
+  const calls = [];
+  w.JARVIS_MODE = mode;
+  w.requestAnimationFrame = () => 0;
+  w.ResizeObserver = class { observe() {} };
+  w.HTMLCanvasElement.prototype.getContext = () => ({});
+  w.webkit = { messageHandlers: { jarvis: { postMessage: value => calls.push(value) } } };
+  w.eval(fs.readFileSync(path.join(root, 'Resources/app.js'), 'utf8')+';window.testMouthPose=mouthPose;');
+  calls.length = 0;
+  return { w, calls };
+}
+const { w, calls } = workspace('workspace');
+assert.match(w.document.getElementById('speechToggle').textContent, /replies on/);
+console.log('PASS: spoken replies default on');
+w.document.getElementById('speechToggle').click(); // User muted typed replies.
+calls.length = 0;
+w.receive({ event: 'conversation', data: { active: true } });
+assert.equal(w.document.body.classList.contains('voice-conversation'), true);
+for (const state of ['listening','thinking','synthesizing','speaking','resuming','idle']) {
+  w.receive({ event: 'state', data: state });
+  assert.equal(w.document.body.classList.contains('voice-conversation'), true);
+}
+console.log('PASS: the prominent face stays active through every conversation phase');
+w.receive({ event: 'transcript', data: 'Help me plan an app' });
+assert.equal(calls.filter(c => c.action === 'chat').length, 0);
+w.receive({ event: 'voiceTurn', data: 'Help me plan an app' });
+assert.equal(calls.filter(c => c.action === 'chat').length, 1);
+assert.equal(calls.find(c => c.action === 'chat').prompt, 'Help me plan an app');
+console.log('PASS: silence-completed voice turn sends automatically, without Enter or Send');
+w.receive({ event: 'reply', data: { text: 'Certainly. What will the app help people do?', model: 'GPT Astra' } });
+const speech = calls.filter(c => c.action === 'speak');
+assert.equal(speech.length, 1);
+assert.equal(speech[0].voice, 'bm_lewis');
+assert.equal(speech[0].conversation, true);
+console.log('PASS: a conversational reply speaks once in Lewis, even if typed replies were muted');
+w.receive({ event: 'state', data: 'speaking' });
+assert.equal(w.document.getElementById('interrupt').hidden, false);
+w.document.getElementById('interrupt').click();
+assert.equal(calls.at(-1).action, 'interrupt');
+console.log('PASS: interruption is available while Jarvis answers');
+w.receive({ event: 'conversation', data: { active: false } });
+assert.equal(w.document.body.classList.contains('voice-conversation'), false);
+const before = calls.filter(c => c.action === 'chat').length;
+w.receive({ event: 'voiceTurn', data: 'Late cancelled transcript' });
+assert.equal(calls.filter(c => c.action === 'chat').length, before);
+console.log('PASS: stopped conversations cannot dispatch late microphone turns');
+const orb = workspace('orb');
+orb.w.receive({ event: 'conversation', data: { active: true } });
+orb.w.receive({ event: 'voiceTurn', data: 'Duplicate turn' });
+orb.w.receive({ event: 'reply', data: { text: 'Duplicate audio', model: 'GPT Astra' } });
+assert.equal(orb.calls.length, 0);
+console.log('PASS: floating orb never duplicates chat requests or spoken replies');
+w.receive({event:'mouthCues',data:[{start:0,end:.5,pose:[0,0,0,1]},{start:.5,end:1,pose:[.32,1,0,0]}]});
+w.receive({event:'state',data:'speaking'});
+w.receive({event:'audioTime',data:.2});
+assert.equal(w.testMouthPose()[0],0);
+assert.equal(w.testMouthPose()[3],1);
+w.receive({event:'audioTime',data:.7});
+assert.ok(w.testMouthPose()[0]>.2 && w.testMouthPose()[1]>.9);
+w.receive({event:'state',data:'idle'});
+assert.equal(w.testMouthPose(),null);
+console.log('PASS: actual audio time selects closed lips and rounded vowels; idle releases the mouth');
+w.receive({event:'cloudVoiceConfigured',data:true});
+w.document.getElementById('voiceSessionToggle').click();
+assert.equal(calls.at(-1).backend,'live');
+assert.equal(calls.at(-1).action,'microphone');
+console.log('PASS: Luna selection honors API streaming voice after a key is saved');
+w.close(); orb.w.close();
