@@ -88,6 +88,14 @@ assert.match(board, /Manager model not configured/);
 w.document.querySelector('#voiceGrid button').click();
 assert.equal(calls.at(-1).action, 'speak');
 console.log('PASS: the board names each director, keeps voice preview, and marks unconnected seats');
+const operations = w.document.querySelector('.seat.operations');
+operations.querySelector('input').value = 'gpt-6-astra';
+[...operations.querySelectorAll('button')].find(button => button.textContent.includes('Save')).click();
+assert.equal(calls.at(-1).action, 'setManagerModel');
+assert.equal(calls.at(-1).model, 'gpt-6-astra');
+w.receive({event:'managerModel', data:''});
+assert.match(w.document.querySelector('.seat.operations').textContent, /Manager model not configured/);
+console.log('PASS: the Operations manager stays unset until a verified model is saved');
 w.receive({event:'taskUpdate', data:[
   {id:'a', state:'running', verified:false, owner:'source-worker', createdAt:'t', updatedAt:'t', resultSummary:'', title:'Inspect source'},
   {id:'b', state:'completed', verified:true, owner:'source-worker', createdAt:'t', updatedAt:'t', resultSummary:'done', title:'Earlier task'}

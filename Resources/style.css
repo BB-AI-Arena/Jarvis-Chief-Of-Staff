@@ -31,3 +31,5 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .task-row strong{display:block;font-weight:500;font-size:13px}
 .task-row small{color:#89a8bd}
 .task-row button{font-size:11px;color:#ffb4b4}
+.manager-field{display:block;margin-top:8px;font-size:10px;color:#89a8bd;text-align:left}
+.manager-field input{display:block;width:100%;margin-top:4px;box-sizing:border-box;padding:7px;background:#102435;border:1px solid #3d6d86;border-radius:8px;color:inherit}

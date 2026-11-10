@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const native=payload=>window.webkit?.messageHandlers.jarvis.postMessage(payload);
 const storage={get(k,f){try{return JSON.parse(localStorage.getItem('jarvis.'+k))??f}catch{return f}},set(k,v){localStorage.setItem('jarvis.'+k,JSON.stringify(v))}};
-let streamingVoice=false;
+let streamingVoice=false;let managerModel='';
 let taskActive=false,mouthCues=[],audioTime=0,audioTimeStamp=0;
 let state='idle',busy=false,spoken=storage.get('spoken',true),motion=storage.get('motion',true),conversationActive=false,audioLevel=0,voiceBackend=storage.get('voiceBackend','local');
 if(!storage.get('lunaFrontV1',false)){storage.set('brain','luna');voiceBackend='local';storage.set('voiceBackend','local');storage.set('lunaFrontV1',true)}
@@ -31,7 +31,7 @@ function renderVoices(){
   {key:'Jarvis',seat:'head',title:'Chief of Staff',model:'GPT-6 Luna',status:'Chairs the table and does not execute tasks.',connected:true,shell:'#f4f7fb',visor:'#39d6ff'},
   {key:'Claude',seat:'left',title:'Chief Technology Officer',model:'not connected',status:'Engineering and review. not connected',connected:false,shell:'#d5dbe3',visor:'#e2b15a'},
   {key:'Grok',seat:'right',title:'Director of Research',model:'not connected',status:'Research. not connected',connected:false,shell:'#c5ced8',visor:'#b9a6ff'},
-  {key:'Local',seat:'operations',title:'Director of Operations',model:'GPT Astra',status:'Hires local models as workers. Manager model not configured.',connected:true,shell:'#eef3f8',visor:'#5ee0c5'},
+  {key:'Local',seat:'operations',title:'Director of Operations',model:'GPT Astra',status:managerModel?`Manager ${managerModel}. Hires local models as workers.`:'Hires local models as workers. Manager model not configured.',connected:true,shell:'#eef3f8',visor:'#5ee0c5'},
   {key:'Designer',seat:'creative',title:'Creative Director',model:'not connected',status:'Design. not connected',connected:false,shell:'#f7f4f8',visor:'#f09ad4'},
   {key:'Manager',seat:'projects',title:'Director of Projects',model:'not connected',status:'Planning. not connected',connected:false,shell:'#e4eaf2',visor:'#8eb6ff'}
  ];
@@ -40,6 +40,12 @@ function renderVoices(){
   const el=document.createElement('section');el.className='seat '+seat.seat+(seat.connected?'':' disconnected');
   const face=seat.key==='Jarvis'?`<img class="helm photo" src="jarvis-android.jpg" alt="">`:helmSVG(seat.key,seat.shell,seat.visor);
   el.innerHTML=`${face}<h2>${escape(seat.title)}</h2><p class="seat-model">${escape(seat.model)}</p><p class="seat-status">${escape(seat.status)}</p><select aria-label="Voice for ${escape(seat.title)}">${Object.entries(voiceNames).map(([id,name])=>`<option value="${id}" ${voices[seat.key]===id?'selected':''}>${name}</option>`).join('')}</select><button type="button">▷ Preview voice</button>`;
+  if(seat.seat==='operations'){
+   const field=document.createElement('label');field.className='manager-field';field.textContent='Manager model';
+   const input=document.createElement('input');input.value=managerModel;input.placeholder='manager model not configured';input.setAttribute('aria-label','Operations manager model');
+   field.append(input);el.append(field);
+   const save=document.createElement('button');save.type='button';save.textContent='Save manager';save.onclick=()=>native({action:'setManagerModel',model:input.value});el.append(save);
+  }
   el.querySelector('select').onchange=e=>{voices[seat.key]=e.target.value;storage.set('voices',voices)};
   el.querySelector('button').onclick=()=>native({action:'speak',text:seat.key==='Jarvis'?'Good evening. Everything is in hand. Shall we turn that rather ambitious idea into a plan?':`Hello. I speak for the ${seat.title}.`,voice:voices[seat.key]});
   root.append(el);
@@ -51,7 +57,7 @@ function renderTasks(tasks){
  panel.hidden=false;
  const active=tasks.filter(task=>task.state==='running'||task.state==='proposed');
  const recent=tasks.filter(task=>task.state!=='running'&&task.state!=='proposed').slice(0,8);
- const row=task=>`<article class="task-row ${task.state}"><div><strong>${escape(task.title)}</strong><small>${escape(task.owner)} · ${escape(task.state)}${task.verified?' · verified':''}${task.resultSummary?' · '+escape(task.resultSummary):''}</small></div>${task.state==='running'?`<button type="button" data-stop="${escape(task.id)}">Stop</button>`:''}</article>`;
+ const row=task=>`<article class="task-row ${task.state}"><div><strong>${escape(task.title)}</strong><small>${escape(task.owner)} · ${escape(task.state)}${task.parentID?' · subtask':''}${task.verified?' · verified':''}${task.resultSummary?' · '+escape(task.resultSummary):''}</small></div>${task.state==='running'?`<button type="button" data-stop="${escape(task.id)}">Stop</button>`:''}</article>`;
  panel.innerHTML=`<div class="panel-heading">TASKS</div><div class="task-group"><h3>Active</h3>${active.length?active.map(row).join(''):'<p>No active tasks.</p>'}</div><div class="task-group"><h3>Recent</h3>${recent.length?recent.map(row).join(''):'<p>No recent tasks.</p>'}</div>`;
  panel.querySelectorAll('button[data-stop]').forEach(button=>button.onclick=()=>native({action:'stopTask',id:button.dataset.stop}));
 }
@@ -63,6 +69,7 @@ window.receive=({event,data})=>{
  switch(event){
  case'taskStarted':taskActive=true;$('stopTask').hidden=false;notice('A background worker is working on Jarvis. You can keep talking.');break;
  case'taskUpdate':renderTasks(data||[]);break;
+ case'managerModel':managerModel=data||'';renderVoices();break;
  case'taskResult':taskActive=false;$('stopTask').hidden=true;messages.push({role:'assistant',text:(data.success?'Task completed.\n\n':'Task needs attention.\n\n')+data.text});saveMessages();notice(data.success?'Background task finished. Open Conversation for the result.':'Background task needs attention. Open Conversation.');break;
  case'voiceStreaming':streamingVoice=!!data;setState(state);if(data)$('connection').textContent='Live voice · Luna backend';break;
  case'cloudVoiceConfigured':if(data){voiceBackend='live';storage.set('voiceBackend','live');$('voiceBackend').value='live';notice('API voice connected. Start a conversation to use streaming audio.')}break;
