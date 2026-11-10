@@ -88,4 +88,17 @@ assert.match(board, /Manager model not configured/);
 w.document.querySelector('#voiceGrid button').click();
 assert.equal(calls.at(-1).action, 'speak');
 console.log('PASS: the board names each director, keeps voice preview, and marks unconnected seats');
+w.receive({event:'taskUpdate', data:[
+  {id:'a', state:'running', verified:false, owner:'source-worker', createdAt:'t', updatedAt:'t', resultSummary:'', title:'Inspect source'},
+  {id:'b', state:'completed', verified:true, owner:'source-worker', createdAt:'t', updatedAt:'t', resultSummary:'done', title:'Earlier task'}
+]});
+const taskPanel = w.document.getElementById('taskPanel');
+assert.equal(taskPanel.hidden, false);
+assert.match(taskPanel.textContent, /Inspect source/);
+assert.match(taskPanel.textContent, /Earlier task/);
+assert.match(taskPanel.textContent, /verified/);
+taskPanel.querySelector('button').click();
+assert.equal(calls.at(-1).action, 'stopTask');
+assert.equal(calls.at(-1).id, 'a');
+console.log('PASS: active and recent tasks render, and Stop targets the running task');
 w.close(); orb.w.close();

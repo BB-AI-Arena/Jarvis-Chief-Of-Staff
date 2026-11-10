@@ -25,3 +25,9 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .helm{width:56px;height:56px;display:block;margin:0 auto;filter:drop-shadow(0 0 10px #39d6ff44)}
 .helm.photo{object-fit:cover;border-radius:50%;background:#071018}
 @media(max-width:980px){.board-seats{grid-template-columns:1fr;grid-template-areas:"head" "left" "right" "operations" "creative" "projects"}.board-table{display:none}}
+.task-panel{margin:8px 0 0;padding:12px 14px;border:1px solid #6fdfff33;border-radius:14px;background:#0c1a28cc;max-height:220px;overflow:auto}
+.task-panel h3{margin:8px 0 4px;font-size:11px;font-weight:500;color:#8fb4c8;letter-spacing:.08em}
+.task-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:6px 0;border-top:1px solid #2a4d6233}
+.task-row strong{display:block;font-weight:500;font-size:13px}
+.task-row small{color:#89a8bd}
+.task-row button{font-size:11px;color:#ffb4b4}

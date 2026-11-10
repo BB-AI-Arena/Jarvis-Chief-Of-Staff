@@ -45,6 +45,16 @@ function renderVoices(){
   root.append(el);
  }
 }
+function renderTasks(tasks){
+ const panel=$('taskPanel');
+ if(!tasks.length){panel.hidden=true;panel.replaceChildren();return}
+ panel.hidden=false;
+ const active=tasks.filter(task=>task.state==='running'||task.state==='proposed');
+ const recent=tasks.filter(task=>task.state!=='running'&&task.state!=='proposed').slice(0,8);
+ const row=task=>`<article class="task-row ${task.state}"><div><strong>${escape(task.title)}</strong><small>${escape(task.owner)} · ${escape(task.state)}${task.verified?' · verified':''}${task.resultSummary?' · '+escape(task.resultSummary):''}</small></div>${task.state==='running'?`<button type="button" data-stop="${escape(task.id)}">Stop</button>`:''}</article>`;
+ panel.innerHTML=`<div class="panel-heading">TASKS</div><div class="task-group"><h3>Active</h3>${active.length?active.map(row).join(''):'<p>No active tasks.</p>'}</div><div class="task-group"><h3>Recent</h3>${recent.length?recent.map(row).join(''):'<p>No recent tasks.</p>'}</div>`;
+ panel.querySelectorAll('button[data-stop]').forEach(button=>button.onclick=()=>native({action:'stopTask',id:button.dataset.stop}));
+}
 function renderProjects(){$('projectGrid').innerHTML='';if(!projects.length){$('projectGrid').innerHTML='<section class="project-card"><p class="eyebrow">A BLANK PAGE IS AN OPPORTUNITY</p><h2>Give your idea a home.</h2><p>Save a project brief here, then work through it with Jarvis. Agent execution will be connected in a later stage.</p></section>';return}projects.forEach(project=>{const card=document.createElement('section');card.className='project-card';card.innerHTML=`<small>PROJECT BRIEF · ${escape(project.date)}</small><h2>${escape(project.title)}</h2><p>${escape(project.brief)}</p><button class="secondary">Discuss with Jarvis ↗</button>`;card.querySelector('button').onclick=()=>{$('projectName').innerHTML='✧ &nbsp; '+escape(project.title);navigate('presence');$('prompt').value='Let’s work on '+project.title+'. Here is the brief:\n'+project.brief;$('prompt').focus()};$('projectGrid').append(card)})}
 function newProject(){const modal=document.createElement('div');modal.className='modal-shade';modal.innerHTML='<form class="project-dialog"><p class="eyebrow">A NEW BEGINNING</p><h2>What are we building?</h2><input name="title" required placeholder="Project name" maxlength="120"><textarea name="brief" required placeholder="The idea, who it helps, what matters…" rows="6" maxlength="12000"></textarea><div><button type="button" class="secondary">Cancel</button><button class="primary" type="submit">Save project</button></div></form>';document.body.append(modal);modal.querySelector('input').focus();modal.querySelector('button').onclick=()=>modal.remove();modal.querySelector('form').onsubmit=e=>{e.preventDefault();const data=new FormData(e.target);projects.push({title:data.get('title'),brief:data.get('brief'),date:new Date().toLocaleDateString()});storage.set('projects',projects);renderProjects();renderCards();modal.remove()}}
 window.receive=({event,data})=>{
@@ -52,6 +62,7 @@ window.receive=({event,data})=>{
  if(window.JARVIS_MODE==='orb'&&!['state','conversation','ready','audioLevel','mouthCues','audioTime'].includes(event))return;
  switch(event){
  case'taskStarted':taskActive=true;$('stopTask').hidden=false;notice('A background worker is working on Jarvis. You can keep talking.');break;
+ case'taskUpdate':renderTasks(data||[]);break;
  case'taskResult':taskActive=false;$('stopTask').hidden=true;messages.push({role:'assistant',text:(data.success?'Task completed.\n\n':'Task needs attention.\n\n')+data.text});saveMessages();notice(data.success?'Background task finished. Open Conversation for the result.':'Background task needs attention. Open Conversation.');break;
  case'voiceStreaming':streamingVoice=!!data;setState(state);if(data)$('connection').textContent='Live voice · Luna backend';break;
  case'cloudVoiceConfigured':if(data){voiceBackend='live';storage.set('voiceBackend','live');$('voiceBackend').value='live';notice('API voice connected. Start a conversation to use streaming audio.')}break;
