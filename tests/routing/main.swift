@@ -47,3 +47,13 @@ assert(nullAssign != nil && RouteDecision.assignment(for: nullAssign!)?.director
 assert(RouteDecision.decode("{\"route\":\"reply\",\"text\":\"Certainly.\",\"director\":null,\"task\":null}")?.route == "reply")
 assert(RouteDecision.decode("{\"route\":\"suggest\",\"text\":\"Shall I?\",\"director\":null,\"task\":null}") == nil)
 print("PASS: Luna's routing schema is strict (every property required, optional ones nullable) and null directors fall back to classify")
+assert(RouteDecision.routes.contains("debate"))
+assert(((RouteDecision.outputSchema["properties"] as! [String: Any])["route"] as! [String: Any])["enum"] as! [String] == RouteDecision.routes)
+let debate = RouteDecision.decode("{\"route\":\"debate\",\"text\":\"I'll put it to the board.\",\"director\":null,\"task\":\"Should we build the handyman app first?\"}")!
+assert(RouteDecision.debateTopic(for: debate) == "Should we build the handyman app first?")
+assert(RouteDecision.assignment(for: debate) == nil && RouteDecision.suggestion(for: debate) == nil)
+let bare = RouteDecision.decode("{\"route\":\"debate\",\"text\":\"Ship this week?\",\"director\":null,\"task\":\"  \"}")!
+assert(RouteDecision.debateTopic(for: bare) == "Ship this week?")
+assert(RouteDecision.debateTopic(for: RouteDecision(route: "reply", text: "Hello", director: nil)) == nil)
+assert(RouteDecision.debateRule.contains("route=debate") && RouteDecision.debateRule.contains("never invent"))
+print("PASS: Jarvis can route a request to a board debate; the question comes from task, and debates are never assignments")

@@ -66,6 +66,18 @@ enum BoardDebate {
         }
         return (clipped.split(separator: " ").dropLast().joined(separator: " ")) + "…"
     }
+    /// What Jarvis says out loud when the debate ends.
+    static func announcement(verdict: Verdict?, rounds: Int) -> String {
+        let span = "\(rounds) round\(rounds == 1 ? "" : "s")"
+        guard let verdict else { return "The board finished after \(span), but the chair could not summarise the outcome. The transcript is on the task list." }
+        return verdict.agreed ? "The board agreed after \(span): \(verdict.decision)" : "The board did not reach consensus after \(span). \(verdict.decision)"
+    }
+    /// What Jarvis says when the debate starts.
+    static func acknowledgement(seats: [String]) -> String {
+        let names = seats.map(title)
+        let list = names.count <= 1 ? names.joined() : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        return "I've put that to the board. The \(list) are debating it now; I'll report their verdict when they finish."
+    }
     /// What the task list keeps: the outcome first, then the full debate.
     static func summary(topic: String, turns: [Turn], verdict: Verdict?, rounds: Int, chair: String) -> String {
         let outcome: String

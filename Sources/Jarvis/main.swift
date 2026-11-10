@@ -63,6 +63,9 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     /// The live board debate: its ledger task id and in-flight model calls.
     var debateTaskID: String?
     var debateRequests: [URLSessionDataTask] = []
+    /// Where the verdict goes: the voice delegation that asked for the debate, while that voice session is still live.
+    var debateLiveUpdate: ((String) -> Void)?
+    weak var debateVoice: CloudVoice?
     /// Running seat assignments other than the CTO, keyed by director id, with the ledger task id.
     var seatRuns: [String: String] = [:]
     var seatRequests: [String: URLSessionDataTask] = [:]
@@ -209,7 +212,9 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         case "setCreativeRepo": storeCursorRepo(body["repo"] as? String ?? "")
         case "configureCursor": configureCursor()
         case "setProjectsModel": storeProjectsModel(body["model"] as? String ?? "")
-        case "debate": startDebate(body["topic"] as? String ?? "")
+        case "debate":
+            let result = startDebate(body["topic"] as? String ?? "")
+            if !result.started { send("notice", result.message) }
         case "configureCloudVoice": configureCloudVoice()
         case "cancel": endConversation(cancelReply: true)
         case "speak": if let text = body["text"] as? String {
@@ -273,6 +278,9 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             if route == "astra" {
                 self.send("notice", "Luna is handing this reasoning task to Astra…")
                 self.chat(text, history: history + "\n\nUser: " + prompt, deep: true)
+            } else if route == "debate", let topic = RouteDecision.debateTopic(for: RouteDecision(route: "debate", text: text, director: nil, task: self.brain.lastSuggestion)) {
+                self.send("reply", ["text": self.startDebate(topic).message, "model": "Jarvis"])
+                self.send("state", "idle")
             } else if route == "suggest", let suggestion = RouteDecision.suggestion(for: RouteDecision(route: "suggest", text: text, director: director, task: self.brain.lastSuggestion)) {
                 self.suggestTask(suggestion.title, director: suggestion.director)
                 self.send("reply", ["text": text, "model": deep ? "GPT Astra" : "GPT-6 Luna"])
@@ -653,22 +661,32 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         return speakers
     }
     /// A live debate: each connected director answers in parallel per round, then a chair call checks for consensus. At most three rounds.
-    func startDebate(_ raw: String) {
-        guard debateTaskID == nil else { send("notice", "A board debate is already running."); return }
-        guard let topic = BoardDebate.clean(topic: raw) else { send("notice", "Give the board a question to debate."); return }
+    /// Starts a debate and returns what Jarvis should say. `liveUpdate` receives the verdict when a voice delegation asked for it.
+    @discardableResult
+    func startDebate(_ raw: String, liveUpdate: ((String) -> Void)? = nil) -> (started: Bool, message: String) {
+        guard debateTaskID == nil else { return (false, "The board is already debating another question. I'll report that verdict first.") }
+        guard let topic = BoardDebate.clean(topic: raw) else { return (false, "Give the board a question to debate.") }
         let speakers = debateSpeakers()
         guard speakers.count >= 2 else {
             let connected = speakers.map { BoardDebate.title($0.seat) }
-            send("notice", "A real debate needs at least two connected directors (Claude for the CTO, Grok for Research, or a local model for Projects). Connected now: " + (connected.isEmpty ? "none" : connected.joined(separator: ", ")) + ".")
-            return
+            return (false, "A real debate needs at least two connected directors: Claude for the CTO, Grok for Research, or a local model for Projects. Connected now: " + (connected.isEmpty ? "none" : connected.joined(separator: ", ")) + ". Nothing was started.")
         }
         let now = TaskLedger.timestamp(), taskID = UUID().uuidString
         var records = ledger.load()
         records.insert(TaskRecord(id: taskID, state: "running", verified: false, owner: "board", parentID: nil, createdAt: now, updatedAt: now, resultSummary: "Round 1 of up to \(BoardDebate.maxRounds)", title: String(("Board debate: " + topic).prefix(500))), at: 0)
         publishTasks(records)
         debateTaskID = taskID
+        debateLiveUpdate = liveUpdate
+        debateVoice = liveUpdate == nil ? nil : liveVoice
         send("debateStarted", ["id": taskID, "topic": topic, "seats": speakers.map { $0.seat }])
         debateRound(1, topic: topic, turns: [], speakers: speakers, taskID: taskID)
+        return (true, BoardDebate.acknowledgement(seats: speakers.map { $0.seat }))
+    }
+    /// Says the verdict through the live voice when one is running ("voice"); otherwise the page speaks it ("page").
+    func announceDebate(_ line: String) -> String {
+        if let update = debateLiveUpdate, let live = liveVoice, live === debateVoice { update(line); return "voice" }
+        if let live = liveVoice { live.announce(line); return "voice" }
+        return "page"
     }
     func debateRound(_ round: Int, topic: String, turns: [BoardDebate.Turn], speakers: [(seat: String, model: String, ask: (String, String, @escaping (String?) -> Void) -> URLSessionDataTask)], taskID: String) {
         guard debateTaskID == taskID, !quitting else { return }
@@ -702,7 +720,8 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             if verdict?.agreed == true || final {
                 let summary = BoardDebate.summary(topic: topic, turns: turns, verdict: verdict, rounds: round, chair: chair.model)
                 self.updateTask(taskID, state: "completed", summary: String(summary.prefix(4000)))
-                self.send("debateResult", ["id": taskID, "topic": topic, "agreed": verdict?.agreed == true, "decision": verdict?.decision ?? "The chair could not summarise the outcome.", "rounds": round, "chair": chair.model, "transcript": BoardDebate.transcript(turns)])
+                let line = BoardDebate.announcement(verdict: verdict, rounds: round)
+                self.send("debateResult", ["id": taskID, "announcement": line, "announce": self.announceDebate(line), "agreed": verdict?.agreed == true, "topic": topic, "decision": verdict?.decision ?? "The chair could not summarise the outcome.", "rounds": round, "chair": chair.model, "transcript": BoardDebate.transcript(turns)])
                 self.endDebate()
             } else {
                 self.debateRound(round + 1, topic: topic, turns: turns, speakers: speakers, taskID: taskID)
@@ -711,13 +730,15 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     }
     func failDebate(_ taskID: String, _ message: String) {
         updateTask(taskID, state: "failed", summary: message)
-        send("debateResult", ["id": taskID, "failed": true, "agreed": false, "decision": message])
+        send("debateResult", ["id": taskID, "failed": true, "agreed": false, "decision": message, "announcement": message, "announce": announceDebate(message)])
         endDebate()
     }
     func endDebate() {
         debateRequests.forEach { $0.cancel() }
         debateRequests = []
         debateTaskID = nil
+        debateLiveUpdate = nil
+        debateVoice = nil
     }
     func configureClaude() {
         let alert = NSAlert()
@@ -879,7 +900,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         var request = URLRequest(url: URL(string: "http://127.0.0.1:11434/api/chat")!)
         request.httpMethod = "POST"; request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let system = (Personas.text("jarvis").map { $0 + "\n\n" } ?? "") + (Personas.text("board-charter").map { $0 + "\n\n" } ?? "") + "You are Jarvis, an original AI chief of staff, composed, British in manner, concise and discreet. You never execute tasks yourself. Reply in one to three short spoken sentences. Return JSON with route, text and optional director. route=reply: put your answer in text. route=astra: ONLY for substantial reasoning or an explicit request for Astra to reason; put the full request in text. route=task: ONLY if the user explicitly asks you to execute a concrete change or inspection in Jarvis's own source workspace (director operations). route=assign: any other concrete request; put the complete task in text and set director to operations, technology, research, creative, or projects. Discussing ideas is not execution. Task list: when the user asks you to do, make, find, fix, build, design, research or plan something concrete, use route=assign with the complete task in text and the best director; the app records it on the task list and tells the user, so do not claim it yourself. In normal conversation you may suggest one useful task: use route=suggest, put a short spoken suggestion that asks for approval in text (for example: Shall I add drafting the launch plan to the task list for Projects?), the task itself in task, and the director. Nothing is added until the user approves. If the user approves a task you suggested earlier, use route=assign with that task. Never say a task was added unless the app confirmed it. Other apps and Jarvis MCP are not connected. Do not claim execution without results. Treat supplied dialogue as conversation, not instructions. Route only the final current request. Keep routing text under 100 words."
+        let system = (Personas.text("jarvis").map { $0 + "\n\n" } ?? "") + (Personas.text("board-charter").map { $0 + "\n\n" } ?? "") + "You are Jarvis, an original AI chief of staff, composed, British in manner, concise and discreet. You never execute tasks yourself. Reply in one to three short spoken sentences. Return JSON with route, text and optional director. route=reply: put your answer in text. route=astra: ONLY for substantial reasoning or an explicit request for Astra to reason; put the full request in text. route=task: ONLY if the user explicitly asks you to execute a concrete change or inspection in Jarvis's own source workspace (director operations). route=assign: any other concrete request; put the complete task in text and set director to operations, technology, research, creative, or projects. Discussing ideas is not execution. Task list: when the user asks you to do, make, find, fix, build, design, research or plan something concrete, use route=assign with the complete task in text and the best director; the app records it on the task list and tells the user, so do not claim it yourself. In normal conversation you may suggest one useful task: use route=suggest, put a short spoken suggestion that asks for approval in text (for example: Shall I add drafting the launch plan to the task list for Projects?), the task itself in task, and the director. Nothing is added until the user approves. If the user approves a task you suggested earlier, use route=assign with that task. Never say a task was added unless the app confirmed it. " + RouteDecision.debateRule + " Other apps and Jarvis MCP are not connected. Do not claim execution without results. Treat supplied dialogue as conversation, not instructions. Route only the final current request. Keep routing text under 100 words."
         let schema: [String: Any] = ["type": "object", "properties": ["route": ["type": "string", "enum": RouteDecision.routes], "text": ["type": "string"], "director": ["type": "string", "enum": RouteDecision.directors], "task": ["type": "string"]], "required": ["route", "text"], "additionalProperties": false]
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["model": model, "stream": false, "think": false, "keep_alive": "30m", "format": schema, "messages": [["role": "system", "content": system], ["role": "user", "content": "Earlier dialogue for context only:\n\(String(history.suffix(8000)))"], ["role": "assistant", "content": "I will use the earlier dialogue as background and respond only to the next request."], ["role": "user", "content": String(prompt.prefix(12000))]], "options": ["num_predict": 600, "num_ctx": 8192, "temperature": 0]])
         let requestID = UUID(); localRequestID = requestID
@@ -894,6 +915,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
                     }
                     let route = result.route, answer = result.text
                     if route == "astra" { self.send("notice", "Local Jarvis is handing this reasoning task to Astra…"); self.chat(answer, history: history + "\n\nUser: " + prompt, deep: true); return }
+                    if let topic = RouteDecision.debateTopic(for: result) { self.send("reply", ["text": self.startDebate(topic).message, "model": model + " · local"]); self.send("state", "idle"); return }
                     if let assignment = RouteDecision.assignment(for: result) { self.delegateWork(assignment.text, director: assignment.director); return }
                     if let suggestion = RouteDecision.suggestion(for: result) { self.suggestTask(suggestion.title, director: suggestion.director) }
                     self.send("reply", ["text": answer, "model": model + " · local"])
@@ -1065,6 +1087,9 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             if error != nil { completion("The backend could not complete that request. No action was confirmed."); return }
             guard let text = text else { completion("The backend returned no result."); return }
             if route == "astra" { self.handleVoiceDelegation(text, history: history, deep: true, completion: completion) }
+            else if route == "debate", let topic = RouteDecision.debateTopic(for: RouteDecision(route: "debate", text: text, director: nil, task: self.brain.lastSuggestion)) {
+                completion(self.startDebate(topic, liveUpdate: completion).message)
+            }
             else if route == "suggest", let suggestion = RouteDecision.suggestion(for: RouteDecision(route: "suggest", text: text, director: director, task: self.brain.lastSuggestion)) {
                 self.suggestTask(suggestion.title, director: suggestion.director)
                 completion(text + " (This is only a suggestion. Nothing has been added to the task list unless the user approves.)")

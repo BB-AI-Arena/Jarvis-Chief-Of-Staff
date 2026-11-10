@@ -257,6 +257,16 @@ console.log('PASS: active and recent tasks render, and Stop targets the running 
   assert.match(w.document.getElementById('agreedRing').textContent, /Ship Friday behind a flag/);
   w.stopBoardDebate();
   console.log('PASS: a live debate is convened by topic, plays each model round as it arrives, and ends on the chair verdict');
+  calls.length = 0;
+  w.receive({event:'debateResult', data:{id:'d2', topic:'Q', agreed:true, decision:'Ship.', rounds:1, chair:'c', transcript:'', announcement:'The board agreed after 1 round: Ship.', announce:'page'}});
+  const spokenVerdict = calls.filter(c => c.action === 'speak');
+  assert.equal(spokenVerdict.length, 1);
+  assert.equal(spokenVerdict[0].text, 'The board agreed after 1 round: Ship.');
+  calls.length = 0;
+  w.receive({event:'debateResult', data:{id:'d3', topic:'Q', agreed:false, decision:'Split.', rounds:3, chair:'c', transcript:'', announcement:'The board did not reach consensus after 3 rounds. Split.', announce:'voice'}});
+  assert.equal(calls.filter(c => c.action === 'speak').length, 0);
+  w.stopBoardDebate();
+  console.log('PASS: the page speaks the verdict only when no live voice session is relaying it');
   w.receive({event:'projectsStatus', data:{connected:false, model:''}});
   assert.match(w.document.querySelector('.seat.projects').textContent, /not connected/);
   w.receive({event:'projectsStatus', data:{connected:true, model:'gemma4:latest'}});

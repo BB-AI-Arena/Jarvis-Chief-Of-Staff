@@ -6,7 +6,7 @@ struct RouteDecision {
     /// For route=suggest: the task Jarvis proposes. Nothing is recorded until Brandon approves it.
     var task: String? = nil
     static let directors = ["operations", "technology", "research", "creative", "projects"]
-    static let routes = ["reply", "astra", "task", "assign", "suggest"]
+    static let routes = ["reply", "astra", "task", "assign", "suggest", "debate"]
     /// Strict structured-output schema for Luna. The API rejects a schema unless every property is listed in `required`,
     /// so optional fields are required but nullable. (An earlier optional-field schema made every Luna call fail.)
     static var outputSchema: [String: Any] {
@@ -28,8 +28,20 @@ struct RouteDecision {
             guard let task = (result["task"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !task.isEmpty else { return nil }
             return RouteDecision(route: route, text: answer, director: classify(task, hinted: director), task: String(task.prefix(500)))
         }
+        if route == "debate" {
+            let question = (result["task"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return RouteDecision(route: route, text: answer, director: nil, task: (question?.isEmpty == false ? question : answer).map { String($0.prefix(500)) })
+        }
         return RouteDecision(route: route, text: answer, director: director)
     }
+    /// For route=debate: the question to put to the board (the task field, or the text when task is empty).
+    static func debateTopic(for decision: RouteDecision) -> String? {
+        guard decision.route == "debate" else { return nil }
+        let topic = (decision.task ?? decision.text).trimmingCharacters(in: .whitespacesAndNewlines)
+        return topic.isEmpty ? nil : topic
+    }
+    /// Shared routing rule for every Jarvis brain: the board debates on request; Jarvis never invents its answer.
+    static let debateRule = "Board debate: when the user asks the board or the directors to debate, discuss, argue out or weigh in on a question, use route=debate with the question in task and a short spoken acknowledgement in text. The app runs a live debate and reports the verdict; never invent what the board thinks."
     /// Work is an assignment to a director. Jarvis is not a director and never executes it.
     static func assignment(for decision: RouteDecision) -> (director: String, text: String)? {
         guard decision.route == "task" || decision.route == "assign" else { return nil }
