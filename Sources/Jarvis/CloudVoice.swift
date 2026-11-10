@@ -28,9 +28,20 @@ final class CloudVoice {
     private var drafts: [String: String] = [:]
     private var lastRole: String?
     private var handledDelegations = Set<String>()
-    private var inputBurstAt: TimeInterval = 0
+    private let decodeQueue = DispatchQueue(label: "jarvis.live.decode", qos: .userInteractive)
+    private var playbackArmed = false
+    private var prebufferedFrames: AVAudioFrameCount = 0
+    private var prebufferWork: DispatchWorkItem?
+    private var idleWork: DispatchWorkItem?
+    private var lastLevelPublish: TimeInterval = 0
+    private var lastPublishedLevel = -1.0
     private var userInput = ""
     private var consumedUserInput = 0
+    /// Hold this much decoded audio before the player starts, then give up after the cap so a short reply still plays.
+    private let prebufferSeconds = 0.15
+    private let prebufferCapSeconds = 0.20
+    /// A drained queue this brief is the same reply (a late packet), not a new utterance.
+    private let idleDisarmSeconds = 0.08
 
     func start(history: [[String: String]], greeting: Bool, apiKey: String) {
         dialogue = Array(history.suffix(16))
@@ -86,18 +97,26 @@ final class CloudVoice {
                 if greeting { commentary("Greet the caller now. Say you are at their service, then listen.") }
             } catch { fail("The microphone or streaming audio output could not start.") }
         case "session.output_audio.delta":
-            if let delta = event["delta"] as? String { play(["data": delta]) }
+            // Decode off the main thread. Scheduling stays on main, which owns the engine.
+            let generation = playbackGeneration
+            let format = outputFormat
+            decodeQueue.async { [weak self] in
+                guard let buffer = CloudVoice.decodePCM(event, format: format) else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, self.playbackGeneration == generation else { return }
+                    self.enqueue(buffer)
+                }
+            }
         case "session.input_transcript.delta", "session.output_transcript.delta":
             guard let text = event["delta"] as? String else { return }
             let role = type == "session.input_transcript.delta" ? "user" : "assistant"
             if let previous = lastRole, previous != role { flushTranscript(previous) }
             lastRole = role; drafts[role, default: ""] += text; onText?(role, text, false)
-            if role == "user" {
-                userInput += text
-                let now = Date().timeIntervalSinceReferenceDate
-                if now-inputBurstAt > 0.65 { flushPlayback() }; inputBurstAt = now
-                onState?("listening")
-            }
+            // Live's documented server events have no speech-start or barge-in signal.
+            // Speaker echo was transcribed as user speech and a gap over 0.65s called
+            // flushPlayback(), which cut the reply off. Transcripts only update the
+            // conversation. The Interrupt control still stops playback.
+            if role == "user" { userInput += text }
         case "session.delegation.created":
             guard let delegation = event["delegation"] as? [String: Any], let id = delegation["id"] as? String, handledDelegations.insert(id).inserted else { return }
             let prompt = String(userInput.dropFirst(consumedUserInput)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -147,9 +166,16 @@ final class CloudVoice {
             let count = Int(buffer.frameLength)
             for i in stride(from: 0, to: count, by: 8) { energy += samples[i]*samples[i] }
             let level = min(1,Double(sqrt(energy / Float(max(1,count/8))))*5)
+            let now = Date().timeIntervalSinceReferenceDate
+            let hot = level > 0.025
+            let elapsed = now-self.lastLevelPublish
+            let hotChanged = hot != (self.lastPublishedLevel > 0.025)
+            let changed = abs(level-self.lastPublishedLevel) >= 0.03 || hotChanged
+            // The mixer tap is about 47 Hz. Speech edges publish immediately; the orb otherwise updates at 10-20 Hz.
+            guard hotChanged || (changed && elapsed >= 0.05) || elapsed >= 0.1 else { return }
+            self.lastLevelPublish = now; self.lastPublishedLevel = level
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, !self.stopped else { return }; self.onLevel?(level)
-                let now = Date().timeIntervalSinceReferenceDate
                 if level > 0.025 {
                     self.lastOutputActivity = now
                     if !self.speaking { self.speaking = true; self.onState?("speaking") }
@@ -159,14 +185,14 @@ final class CloudVoice {
             }
         }
         mixerTap = true
-        engine.prepare(); try engine.start(); captureRunning = true; player.play()
+        engine.prepare(); try engine.start(); captureRunning = true
     }
-    private func play(_ chunk: [String: Any]) {
-        guard let encoded = chunk["data"] as? String, let data = Data(base64Encoded: encoded) else { return }
+    private static func decodePCM(_ chunk: [String: Any], format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard let encoded = chunk["delta"] as? String ?? chunk["data"] as? String, let data = Data(base64Encoded: encoded) else { return nil }
         let channels = chunk["numChannels"] as? Int ?? 1
-        guard (1...2).contains(channels), data.count > 0, data.count < 2_000_000 else { return }
+        guard (1...2).contains(channels), data.count > 0, data.count < 2_000_000 else { return nil }
         let frames = data.count / (2 * channels)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(frames)), let output = buffer.floatChannelData?[0] else { return }
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)), let output = buffer.floatChannelData?[0] else { return nil }
         buffer.frameLength = AVAudioFrameCount(frames)
         data.withUnsafeBytes { bytes in
             for frame in 0..<frames {
@@ -175,11 +201,17 @@ final class CloudVoice {
                 output[frame] = sample / Float(channels)
             }
         }
+        return buffer
+    }
+    private func enqueue(_ buffer: AVAudioPCMBuffer) {
+        guard !stopped, buffer.frameLength > 0 else { return }
+        idleWork?.cancel(); idleWork = nil
         let generation = playbackGeneration; queuedBuffers += 1
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in DispatchQueue.main.async {
             guard let self = self, !self.stopped, self.playbackGeneration == generation else { return }
             self.queuedBuffers = max(0,self.queuedBuffers-1)
             if self.queuedBuffers == 0 {
+                self.scheduleIdleDisarm(generation)
                 self.onLevel?(0)
                 // A display grouping boundary only; this does not certify task completion.
                 self.flushTranscript("assistant")
@@ -189,9 +221,40 @@ final class CloudVoice {
                 }
             }
         } }
+        if playbackArmed { if !player.isPlaying { player.play() }; return }
+        prebufferedFrames += buffer.frameLength
+        if Double(prebufferedFrames)/outputFormat.sampleRate >= prebufferSeconds { beginPlayback(generation); return }
+        guard prebufferWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.stopped, self.playbackGeneration == generation, !self.playbackArmed, self.queuedBuffers > 0 else { return }
+            self.beginPlayback(generation)
+        }
+        prebufferWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + prebufferCapSeconds, execute: work)
+    }
+    private func beginPlayback(_ generation: UUID) {
+        guard !stopped, playbackGeneration == generation, !playbackArmed else { return }
+        prebufferWork?.cancel(); prebufferWork = nil; playbackArmed = true; prebufferedFrames = 0
         if !player.isPlaying { player.play() }
     }
-    private func flushPlayback() { playbackGeneration = UUID(); queuedBuffers = 0; speaking = false; player.stop(); if captureRunning { player.play() }; onLevel?(0) }
+    private func scheduleIdleDisarm(_ generation: UUID) {
+        idleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.stopped, self.playbackGeneration == generation, self.queuedBuffers == 0 else { return }
+            self.disarmPlayback()
+            if self.player.isPlaying { self.player.pause() }
+        }
+        idleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + idleDisarmSeconds, execute: work)
+    }
+    private func disarmPlayback() {
+        playbackArmed = false; prebufferedFrames = 0
+        prebufferWork?.cancel(); prebufferWork = nil
+        idleWork?.cancel(); idleWork = nil
+    }
+    private func flushPlayback() {
+        playbackGeneration = UUID(); queuedBuffers = 0; speaking = false; disarmPlayback(); player.stop(); onLevel?(0)
+    }
     func interrupt() {
         flushPlayback(); onState?("listening")
         write(["type": "session.instructions.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": "Stop speaking now and listen to the user's next input."])
@@ -204,7 +267,7 @@ final class CloudVoice {
     func stop() {
         guard !stopped else { return }
         flushTranscript("user"); flushTranscript("assistant")
-        stopped = true; playbackGeneration = UUID()
+        stopped = true; playbackGeneration = UUID(); disarmPlayback()
         if captureRunning { engine.inputNode.removeTap(onBus: 0); engine.stop(); captureRunning = false }
         if mixerTap { engine.mainMixerNode.removeTap(onBus: 0); mixerTap = false }
         player.stop(); onLevel?(0)
