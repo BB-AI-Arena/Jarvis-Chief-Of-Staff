@@ -5,3 +5,23 @@ body.orb-mode #mini:before{content:'';position:absolute;left:21px;top:18px;width
 .live-transcript{flex-shrink:0;padding:8px 15px 12px;font-size:13px;font-style:italic;line-height:1.5;color:#a5d9ed;max-height:70px;overflow:auto}.live-transcript:empty{display:none}
 body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr);gap:0}body.voice-conversation #conversation .workspace-panel,body.voice-conversation .roster,body.voice-conversation .greeting{display:none}body.voice-conversation #conversation .hero{height:auto;min-height:290px;max-height:none;flex:1}body.voice-conversation #messages{flex:0 1 105px;max-height:105px;width:min(100%,800px);align-self:center;margin-bottom:8px;padding:5px 18px}body.voice-conversation .message{margin-bottom:8px}body.voice-conversation .composer,body.voice-conversation .under-composer,body.voice-conversation .voice-session,body.voice-conversation .live-transcript{width:min(100%,800px);align-self:center}body.voice-conversation .orb-caption{bottom:3px}body.voice-conversation .orb-halo{background:radial-gradient(ellipse,#20a6d90d,transparent 67%)}body.orb-mode.voice-conversation #mini:before{opacity:0}body.orb-mode.voice-conversation #miniOpen{color:#c5f5ff}
 #presence.active{display:flex;flex-direction:column;padding:0 20px 12px}#presence .conversation-main{height:100%;width:100%;max-width:1200px;align-self:center}#presence .hero,body.has-messages #presence .hero{height:auto;min-height:300px;max-height:none;flex:1}#presence .greeting,#presence #messages,#presence .workspace-panel,#presence .roster{display:none}#presence .composer,#presence .voice-session,#presence .under-composer,#presence .live-transcript{width:min(100%,760px);align-self:center}#presence .hero canvas{position:absolute;inset:0}#conversation.active{display:flex;flex-direction:column;gap:12px;padding:20px 40px}#conversation .view-heading{margin:8px 0 15px}.chat-log{overflow:auto;flex:1;min-height:100px;border:1px solid #6aaccc25;border-radius:18px;padding:20px 26px;background:#0a162470}.chat-composer{flex-shrink:0}.chat-composer textarea{min-height:26px}#chatSend{background:#217fa0;border-radius:50%;color:#e1f8ff}#presence .orb-caption{bottom:8px}body.voice-conversation #presence.active{display:flex}
+#team.active{display:flex;flex-direction:column;min-height:0;overflow:auto}
+.boardroom{position:relative;flex:1;min-height:0;border-radius:28px;overflow:auto;background:radial-gradient(ellipse at 50% 46%,#14384a 0%,transparent 42%),radial-gradient(ellipse at 50% 78%,#0c2433 0%,transparent 46%),linear-gradient(180deg,#071018,#050b12);border:1px solid #2f6d8640;box-shadow:inset 0 0 80px #39d6ff14}
+.board-table{position:absolute;left:50%;top:52%;width:min(460px,42%);height:180px;transform:translate(-50%,-50%) perspective(520px) rotateX(58deg);border-radius:50%;background:linear-gradient(180deg,#1a4558,#0c1c28);border:1px solid #5ee7ff55;box-shadow:0 0 0 14px #102838,0 40px 70px #000a,inset 0 0 50px #39d6ff24;pointer-events:none}
+.board-seats{position:relative;display:grid;grid-template-columns:minmax(200px,1fr) minmax(160px,.7fr) minmax(200px,1fr);grid-template-areas:". head ." "left . right" "operations projects creative";gap:10px 14px;padding:12px 16px 16px;align-items:stretch;z-index:1}
+.seat{position:relative;width:auto;padding:8px 10px 10px;border-radius:16px;background:linear-gradient(180deg,#132838ee,#0c1824e6);border:1px solid #6fdfff33;box-shadow:0 16px 40px #0008;text-align:center}
+.seat.head{grid-area:head;border-color:#8af0ff66}
+.seat.left{grid-area:left}
+.seat.right{grid-area:right}
+.seat.operations{grid-area:operations}
+.seat.creative{grid-area:creative}
+.seat.projects{grid-area:projects}
+.seat h2{font-size:13px;font-weight:500;margin:4px 0 0}
+.seat .seat-model{margin:0;color:#d7f6ff;font-size:11px}
+.seat .seat-status{margin:2px 0 6px;color:#89a8bd;font-size:10px;line-height:1.3;min-height:0}
+.seat.disconnected{opacity:.92}
+.seat select{width:100%;padding:7px;background:#102435;border:1px solid #3d6d86;border-radius:8px;color:inherit}
+.seat button{margin-top:8px;font-size:11px;color:#b7ecff}
+.helm{width:56px;height:56px;display:block;margin:0 auto;filter:drop-shadow(0 0 10px #39d6ff44)}
+.helm.photo{object-fit:cover;border-radius:50%;background:#071018}
+@media(max-width:980px){.board-seats{grid-template-columns:1fr;grid-template-areas:"head" "left" "right" "operations" "creative" "projects"}.board-table{display:none}}
