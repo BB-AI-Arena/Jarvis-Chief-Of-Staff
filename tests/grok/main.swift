@@ -1,0 +1,17 @@
+import Foundation
+assert(GrokClient.defaultModel == "grok-4.7")
+assert(GrokClient.sanitize("  grok-4.7 \n") == "grok-4.7")
+assert(GrokClient.sanitize("grok-4.20-0309-reasoning") == "grok-4.20-0309-reasoning")
+assert(GrokClient.sanitize("") == nil)
+assert(GrokClient.sanitize("bad model") == nil)
+assert(GrokClient.sanitize("grok/4") == nil)
+let body = GrokClient.requestBody("Survey the market", model: "grok-4.7", system: "persona")
+assert(body["model"] as? String == "grok-4.7")
+let messages = body["messages"] as! [[String: String]]
+assert(messages[0]["role"] == "system" && messages[0]["content"] == "persona")
+assert(messages[1]["role"] == "user" && messages[1]["content"] == "Survey the market")
+let reply = Data("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\" Three findings. \"}}]}".utf8)
+assert(GrokClient.text(from: reply) == "Three findings.")
+assert(GrokClient.text(from: Data("{\"choices\":[]}".utf8)) == nil)
+assert(GrokClient.text(from: Data("{\"error\":\"bad key\"}".utf8)) == nil)
+print("PASS: Grok defaults to the documented xAI model id, rejects malformed ids, and reads only real completions")

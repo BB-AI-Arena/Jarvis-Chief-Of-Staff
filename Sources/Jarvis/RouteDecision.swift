@@ -3,17 +3,24 @@ struct RouteDecision {
     let route: String
     let text: String
     var director: String?
+    /// For route=suggest: the task Jarvis proposes. Nothing is recorded until Brandon approves it.
+    var task: String? = nil
     static let directors = ["operations", "technology", "research", "creative", "projects"]
+    static let routes = ["reply", "astra", "task", "assign", "suggest"]
     static func decode(_ raw: String) -> RouteDecision? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("```json\n"), text.hasSuffix("```") { text = String(text.dropFirst(8).dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines) }
         else if text.hasPrefix("```\n"), text.hasSuffix("```") { text = String(text.dropFirst(4).dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines) }
-        guard let data = text.data(using: .utf8), let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let route = result["route"] as? String, ["reply", "astra", "task", "assign"].contains(route), let answer = result["text"] as? String, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard let data = text.data(using: .utf8), let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let route = result["route"] as? String, routes.contains(route), let answer = result["text"] as? String, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         let hinted = result["director"] as? String
         if route == "assign" {
             guard let hinted, directors.contains(hinted) else { return nil }
         }
         let director = hinted.flatMap { directors.contains($0) ? $0 : nil }
+        if route == "suggest" {
+            guard let task = (result["task"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !task.isEmpty else { return nil }
+            return RouteDecision(route: route, text: answer, director: classify(task, hinted: director), task: String(task.prefix(500)))
+        }
         return RouteDecision(route: route, text: answer, director: director)
     }
     /// Work is an assignment to a director. Jarvis is not a director and never executes it.
@@ -22,6 +29,11 @@ struct RouteDecision {
         let director = classify(decision.text, hinted: decision.director)
         guard directors.contains(director) else { return nil }
         return (director, decision.text)
+    }
+    /// A suggestion Brandon has not approved yet. It is shown for approval and never recorded as a task.
+    static func suggestion(for decision: RouteDecision) -> (director: String, title: String)? {
+        guard decision.route == "suggest", let task = decision.task, !task.isEmpty else { return nil }
+        return (classify(task, hinted: decision.director), task)
     }
     static func classify(_ text: String, hinted: String?) -> String {
         if let hinted, directors.contains(hinted) { return hinted }

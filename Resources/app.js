@@ -2,8 +2,8 @@
 const $=id=>document.getElementById(id);
 const native=payload=>window.webkit?.messageHandlers.jarvis.postMessage(payload);
 const storage={get(k,f){try{return JSON.parse(localStorage.getItem('jarvis.'+k))??f}catch{return f}},set(k,v){localStorage.setItem('jarvis.'+k,JSON.stringify(v))}};
-let streamingVoice=false;let managerModel='';let claudeConnected=false;let claudeModel='claude-sonnet-5-5';
-let taskActive=false,mouthCues=[],audioTime=0,audioTimeStamp=0;
+let streamingVoice=false;let managerModel='';let claudeConnected=false;let claudeModel='claude-sonnet-5-5';let grokConnected=false,grokModel='grok-4.7',cursorConnected=false,cursorModel='',cursorRepo='https://github.com/BB-AI-Arena/Jarvis-Chief-Of-Staff';
+let suggestions=[],lastTasks=[];let taskActive=false,mouthCues=[],audioTime=0,audioTimeStamp=0;
 let state='idle',busy=false,spoken=storage.get('spoken',true),motion=storage.get('motion',true),conversationActive=false,audioLevel=0,voiceBackend=storage.get('voiceBackend','live');
 if(!storage.get('lunaFrontV1',false)){storage.set('brain','luna');storage.set('lunaFrontV1',true)}
 if(!storage.get('liveVoiceV1',false)){voiceBackend='live';storage.set('voiceBackend','live');storage.set('liveVoiceV1',true)}
@@ -23,50 +23,126 @@ function saveMessages(){storage.set('messages',messages.slice(-100));renderMessa
 function setBusy(value){busy=value;$('send').hidden=value;$('cancel').hidden=!value;$('prompt').disabled=value;renderMessages()}
 function sendMessage(){const prompt=$('prompt').value.trim();if(!prompt||busy)return;const history=messages.filter(m=>m.role==='user'||m.role==='assistant').slice(-16).map(m=>`${m.role}: ${m.text}`).join('\n\n');messages.push({role:'user',text:prompt});$('prompt').value='';saveMessages();setBusy(true);native({action:'chat',prompt,history,model:$('brainSelect').value});notice('Connecting to '+($('brainSelect').value==='astra'?'GPT Astra':$('brainSelect').value==='luna'?'GPT-6 Luna':'Ollama')+'…')}
 function renderCards(tab='overview'){
- const cards=tab==='agents'?[['◉','Jarvis','Chief of Staff','Chairs the board. Does not execute tasks.'],['♧','Directors','Astra runs Operations','Claude, Grok, Creative and Projects are not connected'],['◖','Voices','Kokoro on this Mac','Assign on the Board of Directors']]:tab==='artifacts'?[['▱','Project briefs',`${projects.length} saved locally`,'Open Projects'],['⌘','Knowledge graph',currentRoot?'Folder connected':'No folder connected','Open Knowledge map'],['✧','Build deliverables','No builds dispatched yet','Worker stage pending']]:[['✧','Your next great idea','Start with a conversation.','Astra brainstorming'],['▱','Project workspace',projects.length?`${projects.length} project brief${projects.length===1?'':'s'} saved`:'Ideas, decisions, next steps.','Stored on this Mac'],['⌘','Knowledge constellation',currentRoot?'Explore your connected folder.':'Connect the files that matter.','Graphify · local code mapping']];
+ const cards=tab==='agents'?[['◉','Jarvis','Chief of Staff','Chairs the board. Does not execute tasks.'],['♧','Directors','Astra runs Operations','Each seat shows its live connection on the board'],['◖','Voices','Kokoro on this Mac','Assign on the Board of Directors']]:tab==='artifacts'?[['▱','Project briefs',`${projects.length} saved locally`,'Open Projects'],['⌘','Knowledge graph',currentRoot?'Folder connected':'No folder connected','Open Knowledge map'],['✧','Build deliverables','No builds dispatched yet','Worker stage pending']]:[['✧','Your next great idea','Start with a conversation.','Astra brainstorming'],['▱','Project workspace',projects.length?`${projects.length} project brief${projects.length===1?'':'s'} saved`:'Ideas, decisions, next steps.','Stored on this Mac'],['⌘','Knowledge constellation',currentRoot?'Explore your connected folder.':'Connect the files that matter.','Graphify · local code mapping']];
  $('workspaceCards').innerHTML=cards.map(([icon,title,sub,detail])=>`<div class="task-card"><div class="icon">${icon}</div><div><h3>${title}</h3><p>${escape(sub)}</p><small>${escape(detail)}</small></div></div>`).join('')
 }
-function helmSVG(key,shell,visor){return `<svg class="helm" viewBox="0 0 64 64" aria-hidden="true"><ellipse cx="32" cy="36" rx="22" ry="24" fill="#101820"/><path d="M12 30c1-14 10-20 20-20s19 6 20 20c-1 2-2 3-4 3H16c-2 0-3-1-4-3z" fill="${shell}"/><path d="M16 33c1 12 8 18 16 18s15-6 16-18v6c-1 10-8 16-16 16s-15-6-16-16z" fill="#2c3644"/><path d="M18 31h28c0 7-5 12-14 12S18 38 18 31z" fill="#070d14"/><path d="M22 33c1.2 1.6 4 2.4 6 .6 1.2-1.4.4-3.2-1.2-3.6-2.2-.2-4 1.2-4.8 3z" fill="${visor}"/><path d="M42 33c-1.2 1.6-4 2.4-6 .6-1.2-1.4-.4-3.2 1.2-3.6 2.2-.2 4 1.2 4.8 3z" fill="${visor}"/><rect x="27" y="49" width="10" height="2" rx="1" fill="${visor}"/></svg>`}
+// Boardroom: each seat is a layered character. Positions are percentages of the 16:9 stage.
+const boardLayout={head:{x:50,b:47,h:27,z:10},left:{x:35,b:41,h:30,z:12},right:{x:65,b:41,h:30,z:12},projects:{x:22,b:25,h:38,z:20},operations:{x:83,b:24,h:40,z:20},creative:{x:8.5,b:9,h:44,z:30}};
+const seatAlias={jarvis:'jarvis',head:'jarvis',chief:'jarvis',cto:'cto',technology:'cto',claude:'cto',research:'research',grok:'research',operations:'operations',ops:'operations',astra:'operations',local:'operations',creative:'creative',designer:'creative',projects:'projects',manager:'projects'};
+const seatArt={jarvis:{eye:[50,26,34,7],wave:[50,39],c:'#39d6ff'},cto:{eye:[57,31,40,7],wave:[57,38],c:'#ffc35a'},research:{eye:[54,18,32,15],wave:[52,30],c:'#b58cff'},operations:{eye:[48,25.5,18,7],wave:[48,33],c:'#7fd8ff'},creative:{eye:[48.5,28.5,24,7],wave:[49,36],c:'#ff5fd2'},projects:{eye:[49,21.5,24,4.5],wave:[49,28],c:'#5dffa8'}};
+const rand=(a,b)=>(a+Math.random()*(b-a)).toFixed(2);
+function boardSeats(){return [
+ {key:'Jarvis',seat:'head',id:'jarvis',title:'Chief of Staff',model:'GPT-6 Luna',status:'Chairs the table and does not execute tasks.',connected:true},
+ {key:'Claude',seat:'left',id:'cto',title:'Chief Technology Officer',model:claudeConnected?claudeModel:'not connected',status:claudeConnected?'Engineering and review. connected':'Engineering and review. not connected',connected:claudeConnected},
+ {key:'Grok',seat:'right',id:'research',title:'Director of Research',model:grokConnected?grokModel:'not connected',status:grokConnected?'Grok research. connected':'Grok research. not connected',connected:grokConnected},
+ {key:'Local',seat:'operations',id:'operations',title:'Director of Operations',model:'GPT Astra',status:managerModel?`Manager ${managerModel}. Hires local models as workers.`:'Hires local models as workers. Manager model not configured.',connected:true},
+ {key:'Designer',seat:'creative',id:'creative',title:'Creative Director',label:'Creative Director · Cursor',model:cursorConnected?'Cursor · '+(cursorModel||'default model'):'Cursor · not connected',status:cursorConnected?'Cloud agents on '+cursorRepo.replace(/^https:\/\//,''):'Cloud agents. not connected',connected:cursorConnected},
+ {key:'Manager',seat:'projects',id:'projects',title:'Director of Projects',model:'not connected',status:'Planning. not connected',connected:false}
+]}
+function modelField(el,label,value,placeholder,aria,buttonText,action,key='model'){
+ const field=document.createElement('label');field.className='manager-field';field.textContent=label;
+ const input=document.createElement('input');input.value=value;input.placeholder=placeholder;input.setAttribute('aria-label',aria);
+ field.append(input);el.append(field);
+ const save=document.createElement('button');save.type='button';save.textContent=buttonText;save.onclick=()=>native({action,[key]:input.value});el.append(save);
+}
 function renderVoices(){
- const seats=[
-  {key:'Jarvis',seat:'head',title:'Chief of Staff',model:'GPT-6 Luna',status:'Chairs the table and does not execute tasks.',connected:true,shell:'#f4f7fb',visor:'#39d6ff'},
-  {key:'Claude',seat:'left',title:'Chief Technology Officer',model:claudeConnected?claudeModel:'not connected',status:claudeConnected?'Engineering and review. connected':'Engineering and review. not connected',connected:claudeConnected,shell:'#d5dbe3',visor:'#e2b15a'},
-  {key:'Grok',seat:'right',title:'Director of Research',model:'not connected',status:'Research. not connected',connected:false,shell:'#c5ced8',visor:'#b9a6ff'},
-  {key:'Local',seat:'operations',title:'Director of Operations',model:'GPT Astra',status:managerModel?`Manager ${managerModel}. Hires local models as workers.`:'Hires local models as workers. Manager model not configured.',connected:true,shell:'#eef3f8',visor:'#5ee0c5'},
-  {key:'Designer',seat:'creative',title:'Creative Director',model:'not connected',status:'Design. not connected',connected:false,shell:'#f7f4f8',visor:'#f09ad4'},
-  {key:'Manager',seat:'projects',title:'Director of Projects',model:'not connected',status:'Planning. not connected',connected:false,shell:'#e4eaf2',visor:'#8eb6ff'}
- ];
- const root=$('voiceGrid');root.innerHTML='';
- for(const seat of seats){
-  const el=document.createElement('section');el.className='seat '+seat.seat+(seat.connected?'':' disconnected');
-  const face=seat.key==='Jarvis'?`<img class="helm photo" src="jarvis-android.jpg" alt="">`:helmSVG(seat.key,seat.shell,seat.visor);
-  el.innerHTML=`${face}<h2>${escape(seat.title)}</h2><p class="seat-model">${escape(seat.model)}</p><p class="seat-status">${escape(seat.status)}</p><select aria-label="Voice for ${escape(seat.title)}">${Object.entries(voiceNames).map(([id,name])=>`<option value="${id}" ${voices[seat.key]===id?'selected':''}>${name}</option>`).join('')}</select><button type="button">▷ Preview voice</button>`;
-  if(seat.seat==='left'){
-   const field=document.createElement('label');field.className='manager-field';field.textContent='Claude model';
-   const input=document.createElement('input');input.value=claudeModel;input.placeholder='claude-sonnet-5-5';input.setAttribute('aria-label','Claude model id');
-   field.append(input);el.append(field);
-   const save=document.createElement('button');save.type='button';save.textContent='Save model';save.onclick=()=>native({action:'setClaudeModel',model:input.value});el.append(save);
-  }
-  if(seat.seat==='operations'){
-   const field=document.createElement('label');field.className='manager-field';field.textContent='Manager model';
-   const input=document.createElement('input');input.value=managerModel;input.placeholder='manager model not configured';input.setAttribute('aria-label','Operations manager model');
-   field.append(input);el.append(field);
-   const save=document.createElement('button');save.type='button';save.textContent='Save manager';save.onclick=()=>native({action:'setManagerModel',model:input.value});el.append(save);
-  }
-  el.querySelector('select').onchange=e=>{voices[seat.key]=e.target.value;storage.set('voices',voices)};
-  el.querySelector('button').onclick=()=>native({action:'speak',text:seat.key==='Jarvis'?'Good evening. Everything is in hand. Shall we turn that rather ambitious idea into a plan?':`Hello. I speak for the ${seat.title}.`,voice:voices[seat.key]});
+ const root=$('voiceGrid');const open=root.querySelector('.seat.open')?.dataset.seat;root.innerHTML='';
+ for(const seat of boardSeats()){
+  const pos=boardLayout[seat.seat],art=seatArt[seat.id];
+  const el=document.createElement('section');el.className='seat '+seat.seat+(seat.connected?'':' disconnected')+(open===seat.id?' open':'');el.dataset.seat=seat.id;
+  const vars={'--x':pos.x+'%','--b':pos.b+'%','--h':pos.h+'%','--z':pos.z,'--c':art.c,'--ex':art.eye[0]+'%','--ey':art.eye[1]+'%','--ew':art.eye[2]+'%','--eh':art.eye[3]+'%','--wx':art.wave[0]+'%','--wy':art.wave[1]+'%',
+   '--breath':rand(3.4,5.2)+'s','--bdelay':'-'+rand(0,5)+'s','--look':rand(8,15)+'s','--ldelay':'-'+rand(0,12)+'s','--blink':rand(3.5,7.5)+'s','--blinkd':'-'+rand(0,6)+'s','--busy':rand(2.6,5.4)+'s','--busyd':'-'+rand(0,5)+'s','--scan':rand(1.6,2.8)+'s','--pulse':rand(2,3.4)+'s','--orbit':rand(6,9)+'s','--fill':rand(4,7)+'s'};
+  for(const [k,v] of Object.entries(vars))el.style.setProperty(k,String(v));
+  if(seat.id==='creative')el.style.setProperty('--busy',rand(.8,1.1)+'s');
+  el.innerHTML=`<div class="figure" role="button" tabindex="0" aria-label="${escape(seat.title)} settings"><div class="bob"><div class="sway"><div class="char"><img src="board/${seat.id}.webp" alt="${escape(seat.title)}" draggable="false"><i class="glow"></i><i class="blink"></i><i class="fx"></i><i class="wave"><b></b><b></b><b></b><b></b><b></b></i></div></div></div></div><div class="bubble" aria-live="polite"></div><div class="plate"><h2>${escape(seat.title)}</h2><p class="seat-model">${escape(seat.model)}</p><p class="seat-status">${escape(seat.status)}</p></div>`;
+  const controls=document.createElement('div');controls.className='seat-controls';
+  controls.innerHTML=`<h3>${escape(seat.label||seat.title)}<small>${escape(seat.model)} · ${escape(seat.status)}</small></h3><select aria-label="Voice for ${escape(seat.title)}">${Object.entries(voiceNames).map(([id,name])=>`<option value="${id}" ${voices[seat.key]===id?'selected':''}>${name}</option>`).join('')}</select><button type="button" class="preview">▷ Preview voice</button>`;
+  el.append(controls);
+  if(seat.seat==='left')modelField(controls,'Claude model',claudeModel,'claude-sonnet-5-5','Claude model id','Save model','setClaudeModel');
+  if(seat.seat==='right')modelField(controls,'Grok model',grokModel,'grok-4.7','Grok model id','Save model','setGrokModel');
+  if(seat.seat==='creative'){modelField(controls,'Target repository',cursorRepo,'https://github.com/owner/repo','Creative Director repository','Save repository','setCreativeRepo','repo');modelField(controls,'Cursor model (blank = default)',cursorModel,'default model','Creative Director Cursor model id','Save model','setCreativeModel')}
+  if(seat.seat==='operations')modelField(controls,'Manager model',managerModel,'manager model not configured','Operations manager model','Save manager','setManagerModel');
+  const close=document.createElement('button');close.type='button';close.className='close';close.textContent='Close';close.onclick=()=>el.classList.remove('open');controls.append(close);
+  controls.querySelector('select').onchange=e=>{voices[seat.key]=e.target.value;storage.set('voices',voices)};
+  controls.querySelector('.preview').onclick=()=>native({action:'speak',text:seat.key==='Jarvis'?'Good evening. Everything is in hand. Shall we turn that rather ambitious idea into a plan?':`Hello. I speak for the ${seat.title}.`,voice:voices[seat.key]});
+  const toggle=()=>{const was=el.classList.contains('open');root.querySelectorAll('.seat.open').forEach(s=>s.classList.remove('open'));el.classList.toggle('open',!was)};
+  el.querySelector('.figure').onclick=toggle;el.querySelector('.plate').onclick=toggle;
+  el.querySelector('.figure').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}};
   root.append(el);
  }
 }
+// Debate playback: animates turns it is given. It does not generate or claim model output.
+let debateToken=0;
+function boardSeat(id){const key=seatAlias[String(id||'').toLowerCase()]||id;return $('voiceGrid').querySelector(`.seat[data-seat="${key}"]`)}
+function clearBoardTalk(){const root=$('voiceGrid');root.querySelectorAll('.seat').forEach(s=>{s.classList.remove('talking','listening');s.style.removeProperty('--lean');s.style.removeProperty('--leanx')})}
+function setBoardSpeaker(el,text){
+ clearBoardTalk();const root=$('voiceGrid');root.classList.add('debating');
+ el.classList.add('talking');el.querySelector('.bubble').textContent=text;
+ const x=parseFloat(el.style.getPropertyValue('--x'))||50;
+ root.querySelectorAll('.seat').forEach(s=>{if(s===el)return;const mx=parseFloat(s.style.getPropertyValue('--x'))||50;const dir=Math.sign(x-mx)||0;s.classList.add('listening');s.style.setProperty('--lean',(dir*2.4)+'deg');s.style.setProperty('--leanx',(dir*3)+'%')});
+}
+function playBoardDebate(turns,options={}){
+ const {agreement=true,summary='',demo=false,pace=1}=options;
+ const token=++debateToken,root=$('voiceGrid'),ring=$('agreedRing');
+ root.classList.remove('agreed');ring.hidden=true;$('debateBanner').hidden=!demo;
+ const list=(turns||[]).filter(t=>t&&t.text);
+ return new Promise(resolve=>{
+  let index=0;
+  const finish=done=>{if(token===debateToken){clearBoardTalk();root.classList.remove('debating','agreed');ring.hidden=true;$('debateBanner').hidden=true}resolve(done)};
+  const step=()=>{
+   if(token!==debateToken)return resolve(false);
+   if(index>=list.length){
+    clearBoardTalk();
+    if(!agreement){finish(true);return}
+    root.classList.add('agreed');ring.querySelector('small').textContent=summary;ring.hidden=false;
+    setTimeout(()=>finish(true),2800*pace);return;
+   }
+   const turn=list[index++];const el=boardSeat(turn.seat);
+   if(!el){step();return}
+   setBoardSpeaker(el,String(turn.text));
+   setTimeout(step,Math.min(6500,Math.max(1900,String(turn.text).length*58))*pace);
+  };
+  step();
+ });
+}
+function stopBoardDebate(){debateToken++;clearBoardTalk();$('voiceGrid').classList.remove('debating','agreed');$('agreedRing').hidden=true;$('debateBanner').hidden=true}
+window.playBoardDebate=playBoardDebate;window.stopBoardDebate=stopBoardDebate;
+const demoDebateTurns=[
+ {seat:'jarvis',text:'Demo topic: should we ship the boardroom this week?'},
+ {seat:'cto',text:'Only if the checks pass. Keep it simple.'},
+ {seat:'research',text:'Show me evidence people want it first.'},
+ {seat:'operations',text:'Local models can render previews at no API cost.'},
+ {seat:'creative',text:'Ship it bold. The androids sell it.'},
+ {seat:'projects',text:'Cut scope: boardroom now, live debates next.'},
+ {seat:'cto',text:'Fine, if live debates stay behind a flag.'},
+ {seat:'jarvis',text:'Then we agree: boardroom now, debates next.'}
+];
+function ownerLabel(owner){const o=String(owner||'').toLowerCase();if(o==='technology'||o.startsWith('claude'))return 'CTO';if(o==='research'||o.startsWith('grok'))return 'Research';if(o==='creative')return 'Creative';if(o==='projects')return 'Projects';if(o.startsWith('operations')||o==='source-worker'||o.startsWith('gpt-')||o.includes(':'))return 'Operations';return owner||'unassigned'}
+// Suggested tasks wait here for Brandon's approval. Nothing reaches the ledger until Approve.
+function suggestionRows(){return suggestions.map((t,i)=>`<article class="task-row suggested"><div><strong>${escape(t.title)}</strong><small><span class="chip">suggested</span>${escape(t.owner||ownerLabel(t.director))} · needs your approval</small></div><span><button type="button" data-approve="${i}">Approve</button> <button type="button" data-dismiss="${i}">Dismiss</button></span></article>`).join('')}
+function wireSuggestions(panel){
+ panel.querySelectorAll('button[data-approve]').forEach(b=>b.onclick=()=>{const t=suggestions[Number(b.dataset.approve)];if(!t)return;suggestions.splice(Number(b.dataset.approve),1);native({action:'approveTask',title:t.title,director:t.director});renderTasks(lastTasks)});
+ panel.querySelectorAll('button[data-dismiss]').forEach(b=>b.onclick=()=>{suggestions.splice(Number(b.dataset.dismiss),1);renderTasks(lastTasks)});
+}
+function renderBoardTasks(tasks){
+ const panel=$('boardTasks');if(!panel)return;
+ const active=tasks.filter(t=>t.state==='running'||t.state==='proposed').slice(0,6);
+ const recent=tasks.filter(t=>t.state!=='running'&&t.state!=='proposed').slice(0,4);
+ const row=t=>`<article class="task-row ${escape(t.state)}"><div><strong>${escape(t.title)}</strong><small><span class="chip ${escape(t.state)}">${escape(t.state)}</span>${escape(ownerLabel(t.owner))}${t.parentID?' · subtask':''}${t.verified?' · ✓ verified':''}</small></div>${t.state==='running'?`<button type="button" data-stop="${escape(t.id)}">Stop</button>`:''}</article>`;
+ panel.innerHTML=`<div class="panel-heading"><span>TASK LIST</span><span>${active.length} active</span></div>${suggestionRows()}${active.length||recent.length?active.map(row).join('')+recent.map(row).join(''):(suggestions.length?'':'<p>No tasks yet. Ask Jarvis for something and it lands here.</p>')}`;wireSuggestions(panel);
+ panel.querySelectorAll('button[data-stop]').forEach(b=>b.onclick=()=>native({action:'stopTask',id:b.dataset.stop}));
+}
 function renderTasks(tasks){
+ lastTasks=tasks;renderBoardTasks(tasks);
  const panel=$('taskPanel');
- if(!tasks.length){panel.hidden=true;panel.replaceChildren();return}
+ if(!tasks.length&&!suggestions.length){panel.hidden=true;panel.replaceChildren();return}
  panel.hidden=false;
  const active=tasks.filter(task=>task.state==='running'||task.state==='proposed');
  const recent=tasks.filter(task=>task.state!=='running'&&task.state!=='proposed').slice(0,8);
  const row=task=>`<article class="task-row ${task.state}"><div><strong>${escape(task.title)}</strong><small>${escape(task.owner)} · ${escape(task.state)}${task.parentID?' · subtask':''}${task.verified?' · verified':''}${task.resultSummary?' · '+escape(task.resultSummary):''}</small></div>${task.state==='running'?`<button type="button" data-stop="${escape(task.id)}">Stop</button>`:''}</article>`;
- panel.innerHTML=`<div class="panel-heading">TASKS</div><div class="task-group"><h3>Active</h3>${active.length?active.map(row).join(''):'<p>No active tasks.</p>'}</div><div class="task-group"><h3>Recent</h3>${recent.length?recent.map(row).join(''):'<p>No recent tasks.</p>'}</div>`;
+ panel.innerHTML=`<div class="panel-heading">TASKS</div>${suggestions.length?`<div class="task-group"><h3>Suggested</h3>${suggestionRows()}</div>`:''}<div class="task-group"><h3>Active</h3>${active.length?active.map(row).join(''):'<p>No active tasks.</p>'}</div><div class="task-group"><h3>Recent</h3>${recent.length?recent.map(row).join(''):'<p>No recent tasks.</p>'}</div>`;
  panel.querySelectorAll('button[data-stop]').forEach(button=>button.onclick=()=>native({action:'stopTask',id:button.dataset.stop}));
+ wireSuggestions(panel);
 }
 function renderProjects(){$('projectGrid').innerHTML='';if(!projects.length){$('projectGrid').innerHTML='<section class="project-card"><p class="eyebrow">A BLANK PAGE IS AN OPPORTUNITY</p><h2>Give your idea a home.</h2><p>Save a project brief here, then work through it with Jarvis. Agent execution will be connected in a later stage.</p></section>';return}projects.forEach(project=>{const card=document.createElement('section');card.className='project-card';card.innerHTML=`<small>PROJECT BRIEF · ${escape(project.date)}</small><h2>${escape(project.title)}</h2><p>${escape(project.brief)}</p><button class="secondary">Discuss with Jarvis ↗</button>`;card.querySelector('button').onclick=()=>{$('projectName').innerHTML='✧ &nbsp; '+escape(project.title);navigate('presence');$('prompt').value='Let’s work on '+project.title+'. Here is the brief:\n'+project.brief;$('prompt').focus()};$('projectGrid').append(card)})}
 function newProject(){const modal=document.createElement('div');modal.className='modal-shade';modal.innerHTML='<form class="project-dialog"><p class="eyebrow">A NEW BEGINNING</p><h2>What are we building?</h2><input name="title" required placeholder="Project name" maxlength="120"><textarea name="brief" required placeholder="The idea, who it helps, what matters…" rows="6" maxlength="12000"></textarea><div><button type="button" class="secondary">Cancel</button><button class="primary" type="submit">Save project</button></div></form>';document.body.append(modal);modal.querySelector('input').focus();modal.querySelector('button').onclick=()=>modal.remove();modal.querySelector('form').onsubmit=e=>{e.preventDefault();const data=new FormData(e.target);projects.push({title:data.get('title'),brief:data.get('brief'),date:new Date().toLocaleDateString()});storage.set('projects',projects);renderProjects();renderCards();modal.remove()}}
@@ -76,8 +152,11 @@ window.receive=({event,data})=>{
  switch(event){
  case'taskStarted':taskActive=true;$('stopTask').hidden=false;notice('A background worker is working on Jarvis. You can keep talking.');break;
  case'taskUpdate':renderTasks(data||[]);break;
+ case'taskSuggestion':if(data&&data.title&&!suggestions.some(t=>t.title===data.title)){suggestions.unshift({title:String(data.title),director:String(data.director||''),owner:String(data.owner||'')});suggestions=suggestions.slice(0,5);renderTasks(lastTasks)}break;
  case'managerModel':managerModel=data||'';renderVoices();break;
  case'claudeStatus':claudeConnected=!!(data&&data.connected);if(data&&data.model)claudeModel=data.model;renderVoices();break;
+ case'grokStatus':grokConnected=!!(data&&data.connected);if(data&&data.model)grokModel=data.model;renderVoices();break;
+ case'creativeStatus':cursorConnected=!!(data&&data.connected);if(data&&typeof data.model==='string')cursorModel=data.model;if(data&&data.repo)cursorRepo=data.repo;renderVoices();break;
  case'taskResult':taskActive=false;$('stopTask').hidden=true;messages.push({role:'assistant',text:(data.success?'Task completed.\n\n':'Task needs attention.\n\n')+data.text});saveMessages();notice(data.success?'Background task finished. Open Conversation for the result.':'Background task needs attention. Open Conversation.');break;
  case'inputLevel':$('inputMeter').value=Number(data)||0;break;
  case'voiceStreaming':streamingVoice=!!data;$('inputMeter').hidden=!data;setState(state);if(data)$('connection').textContent='Live voice · Luna backend';break;
@@ -115,17 +194,21 @@ document.querySelectorAll('nav button').forEach(button=>button.onclick=()=>navig
 $('send').onclick=sendMessage;$('prompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}};$('prompt').oninput=()=>{$('prompt').style.height='auto';$('prompt').style.height=Math.min($('prompt').scrollHeight,96)+'px'};
 $('cancel').onclick=()=>native({action:'cancel'});$('mic').onclick=()=>native(voiceRequest());$('interrupt').onclick=()=>native({action:'interrupt'});$('collapse').onclick=()=>native({action:'collapse'});$('miniOpen').onclick=()=>native({action:'open'});let miniDragging=false;$('dragHandle').onpointerdown=e=>{miniDragging=true;e.target.setPointerCapture(e.pointerId);native({action:'dragBegin'});e.preventDefault()};$('dragHandle').onpointermove=()=>{if(miniDragging)native({action:'dragMove'})};$('dragHandle').onpointerup=()=>{miniDragging=false;native({action:'dragEnd'})};$('dragHandle').onpointercancel=()=>{miniDragging=false;native({action:'dragEnd'})};
 for(const id of ['chooseFolder','chooseFolderEmpty','attach'])$(id).onclick=()=>{navigate('files');native({action:'folder'})};$('refreshMap').onclick=()=>native({action:'refresh'});$('refreshModels').onclick=()=>native({action:'models'});$('showMini').onclick=()=>native({action:'collapse'});$('voiceSettings').onclick=()=>navigate('team');$('newProject').onclick=newProject;$('projectName').onclick=()=>navigate('projects');$('meetingBrainstorm').onclick=()=>{navigate('presence');$('prompt').value='Help me think through an important decision. Ask me what you need to know.';$('prompt').focus()};
-$('voiceSessionToggle').onclick=()=>native(voiceRequest());$('speechToggle').onclick=()=>{spoken=!spoken;storage.set('spoken',spoken);updateSpeech();if(!spoken)native({action:'stopSpeech'})};function updateSpeech(){$('speechToggle').textContent=conversationActive?'◖ Voice conversation on':'◖ Spoken replies '+(spoken?'on':'off');$('speechToggle').disabled=conversationActive}updateSpeech();$('motionToggle').checked=motion;$('motionToggle').onchange=e=>{motion=e.target.checked;storage.set('motion',motion)};$('clearChat').onclick=()=>{if(confirm('Clear this local conversation?')){messages=[];saveMessages();notice('Conversation cleared.')}};
+$('voiceSessionToggle').onclick=()=>native(voiceRequest());$('speechToggle').onclick=()=>{spoken=!spoken;storage.set('spoken',spoken);updateSpeech();if(!spoken)native({action:'stopSpeech'})};function updateSpeech(){$('speechToggle').textContent=conversationActive?'◖ Voice conversation on':'◖ Spoken replies '+(spoken?'on':'off');$('speechToggle').disabled=conversationActive}updateSpeech();$('motionToggle').checked=motion;document.body.classList.toggle('no-motion',!motion);$('motionToggle').onchange=e=>{motion=e.target.checked;storage.set('motion',motion);document.body.classList.toggle('no-motion',!motion)};$('clearChat').onclick=()=>{if(confirm('Clear this local conversation?')){messages=[];saveMessages();notice('Conversation cleared.')}};
 function updateBrain(){const m=$('brainSelect').value;$('modelCaption').textContent=m==='luna'?'Luna conversation · Astra reasoning':m==='astra'?'GPT Astra · deep reasoning':m+' · on this Mac';$('connection').textContent=m==='luna'?'Luna · conversation ready':m==='astra'?'Astra · ready to connect':'Ollama · local mode'}$('brainSelect').onchange=()=>{storage.set('brain',$('brainSelect').value);updateBrain()};
 $('folderMode').onclick=()=>{graphMode='folders';$('folderMode').classList.add('selected');$('semanticMode').classList.remove('selected');drawGraph()};$('semanticMode').onclick=()=>{graphMode='graphify';$('semanticMode').classList.add('selected');$('folderMode').classList.remove('selected');drawGraph()};$('graphSearch').oninput=drawGraph;const map=$('graphCanvas');map.onwheel=e=>{e.preventDefault();zoom=Math.min(6,Math.max(.35,zoom*Math.exp(-e.deltaY*.003)));drawGraph()};map.onmousedown=e=>{dragStart={x:e.clientX,y:e.clientY,panX,panY};dragging=false};window.addEventListener('mousemove',e=>{if(!dragStart)return;const dx=e.clientX-dragStart.x,dy=e.clientY-dragStart.y;if(Math.abs(dx)+Math.abs(dy)>4)dragging=true;panX=dragStart.panX+dx;panY=dragStart.panY+dy;drawGraph()});window.addEventListener('mouseup',()=>dragStart=null);map.onclick=e=>{if(dragging)return;const rect=map.getBoundingClientRect();const node=hitNodes.find(p=>Math.hypot(p.x-(e.clientX-rect.left),p.y-(e.clientY-rect.top))<12)?.node;if(!node){$('nodeDetail').hidden=true;return}const detail=$('nodeDetail');detail.hidden=false;const label=node.label??node.name??node.id;const path=node.kind?node.id:node.source_file??node.file??'';detail.innerHTML=`<strong>${escape(label)}</strong><p>${escape(path||'Graphify code concept')}</p><small>${graphMode==='folders'?'Filesystem structure':'Graphify code relationship'}</small>`;if(path&&currentRoot&&(String(path).startsWith(currentRoot+'/')||path===currentRoot)){const reveal=document.createElement('button');reveal.textContent='Reveal in Finder ↗';reveal.onclick=()=>native({action:'reveal',path});detail.append(document.createElement('br'),reveal)}};new ResizeObserver(drawGraph).observe(map);
-if(window.JARVIS_MODE==='orb'){document.body.classList.add('orb-mode');startOrb($('miniOrb'),true)}else{startOrb($('heroOrb'));renderMessages();renderVoices();renderCards();renderProjects();native({action:'models'})}native({action:'ready',backend:voiceBackend,history:messages.filter(m=>m.role==='user'||m.role==='assistant').slice(-16).map(m=>({role:m.role,text:m.text}))});
+if(window.JARVIS_MODE==='orb'){document.body.classList.add('orb-mode');startOrb($('miniOrb'),true)}else{startOrb($('heroOrb'));renderMessages();renderVoices();renderBoardTasks([]);renderCards();renderProjects();native({action:'models'})}native({action:'ready',backend:voiceBackend,history:messages.filter(m=>m.role==='user'||m.role==='assistant').slice(-16).map(m=>({role:m.role,text:m.text}))});
 
 $('backToJarvis').onclick=()=>navigate('presence');$('chatSend').onclick=()=>{$('prompt').value=$('chatPrompt').value;$('chatPrompt').value='';sendMessage()};$('chatPrompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chatSend').click()}};$('voiceBackend').value=voiceBackend;$('voiceBackend').onchange=e=>{voiceBackend=e.target.value;storage.set('voiceBackend',voiceBackend);if(conversationActive)native({action:'cancel'});notice('Voice connection saved. Start a new conversation to use it.')};
 
 $('configureCloudVoice').onclick=()=>native({action:'configureCloudVoice'});
 $('configureClaude').onclick=()=>native({action:'configureClaude'});
+$('configureGrok').onclick=()=>native({action:'configureGrok'});
+
+$('configureCursor').onclick=()=>native({action:'configureCursor'});
 
 $('stopTask').onclick=()=>native({action:'stopTask'});
+$('demoDebate').onclick=()=>playBoardDebate(demoDebateTurns,{agreement:true,summary:'Demo · boardroom now, debates next',demo:true});
 
 function mouthPose(){
  if(state!=='speaking'||!mouthCues.length)return null;
