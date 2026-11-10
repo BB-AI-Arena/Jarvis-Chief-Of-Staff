@@ -27,7 +27,7 @@ Imagine opening your Mac and talking through the business you want to build. Jar
 
 That is the direction of **Jarvis-Chief-Of-Staff**: a personal AI headquarters with a memorable face, a distinctive voice and the beginnings of a real executive team.
 
-**Already in the source:** streaming voice, local model support, an animated boardroom, provider adapters, approval-based task suggestions, a persistent task ledger and an interactive file graph. This is an actively developed source build; provider seats require configuration, and the larger autonomous office is still being built.
+**Already in the source:** streaming voice, local model support, an animated boardroom, real board debates, a local Ollama Projects director, a GPT-6-Sol Operations manager, approval-based task suggestions, a persistent task ledger and an interactive file graph. This is an actively developed source build; provider seats require configuration, and the larger autonomous office is still being built.
 
 ## See the actual app
 
@@ -64,10 +64,31 @@ The board gives each specialist a seat, a persona and a clear responsibility. Co
 | **Chief Technology Officer** | Engineering judgment and technical coordination | Anthropic/Claude adapter, configurable model, native tool-call handling and bounded tool rounds. Requires a verified API connection. |
 | **Director of Research** | Research and alternative perspectives | xAI/Grok request adapter and configurable model. Requires a verified API connection; live web research is not supplied by this adapter alone. |
 | **Creative Director** | Design direction, naming, copy and repository work | Cursor Cloud Agents adapter with a configurable repository/model, run polling, result links and cancellation. Requires API access and repository authorization. |
-| **Director of Operations** | Scoped execution and source-workspace coordination | Configurable manager backed by the local agent runtime; can dispatch a constrained Jarvis source worker. |
-| **Director of Projects** | Planning and project coordination | Persona and assignment seat; execution backend remains unconnected. |
+| **Director of Operations** | Scoped execution and source-workspace coordination | Select **GPT-6-Sol** (`gpt-6-sol`) to run source work at **medium reasoning effort** through the local agent runtime. Assignments retain their manager/worker relationship in the task ledger. |
+| **Director of Projects** | Planning and project coordination | Runs on a selected, installed **local Ollama model**. Produces plans and joins live board debates; its chat adapter cannot browse, edit files or run commands. |
 
-A staged debate playback demonstrates turn-taking and agreement animation. It is labeled as a **demo**, separate from real provider calls. Autonomous multi-model council deliberation is on the roadmap.
+### Real questions. Real model replies. A recorded verdict.
+
+**Ask the board to debate a decision** by voice or use the boardroom debate control. Jarvis convenes the connected CTO (Claude), Research Director (Grok) and Projects Director (local Ollama). At least **two connected directors** are required.
+
+1. **Directors take a position.** Each round calls the participating models in parallel with the question and the previous rounds' transcript.
+2. **The board responds to itself.** Later rounds include the earlier positions so directors can challenge, refine or concede a point.
+3. **A chair call assesses agreement.** The first available speaking seat, in CTO → Research → Projects order, evaluates the transcript after each round. The debate ends on reported agreement or after **three rounds**.
+4. **Jarvis reports the outcome.** The boardroom displays the replies and verdict; Jarvis announces agreement, unresolved disagreement or an unusable verdict. The task ledger retains an outcome summary, chair model and debate transcript excerpt.
+
+> **Try:** “Jarvis, ask the board whether we should launch a native Mac app first or start with a web app.”
+
+The **Demo debate** remains available as a separately labeled, scripted animation preview. Live debates use actual provider responses. Creative and Operations run jobs rather than chat turns, so they do not participate in the current debate loop. A model's agreement verdict is an assessment of the discussion, not independent verification of its conclusions.
+
+### Local planning. Focused execution.
+
+| Projects · Ollama | Operations · GPT-6-Sol |
+| :--- | :--- |
+| Choose a model already installed on your Mac; Jarvis checks the local Ollama model list before saving it. | Set the manager to `gpt-6-sol` using the compatible local agent runtime. |
+| Turn a brief into milestones, responsibilities, risks and a concrete next move. | Source workers use the selected runtime manager model with `model_reasoning_effort="medium"`. |
+| Planning requests run through the local Ollama endpoint. This director can also contribute to a debate with cloud directors. | Work remains scoped to Jarvis's source workspace, with a result report and stop control. |
+
+The worker model follows a supported runtime manager selection. If that selection cannot run a source worker, the current fallback is Astra; a local Ollama manager does not itself execute the runtime's coding-worker protocol.
 
 ## From conversation to accountable work
 
@@ -86,7 +107,7 @@ The ledger is a foundation for dependable execution. Automatic dependency schedu
 
 **Swift + AppKit · WKWebView · Three.js · Python helpers**
 
-The native shell hosts bundled HTML, CSS and JavaScript. Three.js provides the portrait presence; Kokoro handles local speech; Graphify extracts code relationships; Ollama supplies optional local conversation models.
+The native shell hosts bundled HTML, CSS and JavaScript. Three.js provides the portrait presence; Kokoro handles local speech; Graphify extracts code relationships; Ollama supplies optional local conversation models and the Projects director.
 
 | Layer | Purpose |
 | :--- | :--- |
@@ -94,6 +115,7 @@ The native shell hosts bundled HTML, CSS and JavaScript. Three.js provides the p
 | `CloudVoice.swift` / `ConversationBrain.swift` | Streaming audio and delegated model routing. |
 | `ClaudeClient.swift` / `GrokClient.swift` / `CursorClient.swift` | Specialist provider adapters. |
 | `TaskLedger.swift` / `Personas.swift` | Persistent task records and bundled executive personas. |
+| `BoardDebate.swift` / `OllamaClient.swift` | Live debate prompts and verdict parsing; local Projects requests. |
 | `Frontend/presence.mjs` / `Resources/` | Portrait renderer, boardroom and application interface. |
 | `scripts/voice.py` / `scripts/visemes.py` | Local speech generation and phoneme-aligned facial cues. |
 
@@ -132,9 +154,10 @@ open dist/Jarvis.app
 
 1. Open **Settings**, connect OpenAI realtime voice through the native secure key field and select realtime conversation audio.
 2. Start a conversation and choose your conversation brain. Use Ollama for a local conversation path or Luna/Astra through the configured runtime.
-3. Open the board to configure the specialist providers you want to use. A seat becomes connected only after its connection check succeeds.
-4. Select a local folder to explore its structure and available Graphify relationships.
-5. Save a project brief, discuss it with Jarvis and give a connected director a concrete assignment.
+3. Open the board to configure the specialist providers you want to use. Select an installed Ollama model for **Projects** and set **Operations** to `gpt-6-sol` for source work at medium reasoning effort. Provider seats require their connection checks.
+4. Connect at least two speaking directors—CTO, Research or Projects—then ask Jarvis to put a question to the board.
+5. Select a local folder to explore its structure and available Graphify relationships.
+6. Save a project brief, discuss it with Jarvis and give a connected director a concrete assignment.
 
 This is an ad-hoc signed development app. Helper environments and the source workspace must remain available; a self-contained, notarized installer is a future milestone.
 
@@ -147,7 +170,7 @@ npm test
 ./scripts/check.sh
 ```
 
-Bundled frontend assets are committed, so a normal native build does not require rebuilding them with Node. The check script exercises compilation, turn detection, routing, voice activity, task records, provider parsing, personas and conversation UI behavior. These checks do not establish that every external provider is configured or available.
+Bundled frontend assets are committed, so a normal native build does not require rebuilding them with Node. The check script exercises compilation, turn detection, routing, voice activity, task records, provider parsing, debate prompts and verdicts, local Projects responses, Operations worker selection, personas and conversation UI behavior. These checks do not establish that every external provider is configured or available.
 
 See [VALIDATION.md](VALIDATION.md) for earlier device and integration observations. The optional `scripts/probe_live.py` checks real cloud audio using the local Keychain credential without capturing the microphone or printing the key.
 
@@ -166,14 +189,17 @@ The ambition is a chief of staff who can help take an idea all the way to a revi
 
 - [ ] **Persistent project memory** — retrieve decisions, preferences, commitments and relevant files with source references.
 - [ ] **A dependable execution engine** — dependencies, retries, restart recovery and independently verified outcomes.
-- [ ] **Real executive meetings** — specialist deliberation, disagreement resolution and recorded decisions.
+- [x] **Live board debates** — connected directors, up to three rounds, a chair-assessed verdict and a saved outcome.
+- [x] **Local Projects director** — planning and debate participation through an installed Ollama model.
+- [x] **GPT-6-Sol Operations** — source workers follow the selected runtime manager at medium reasoning effort.
+- [ ] **Richer executive meetings** — evidence-backed decisions, broader participation and decisions that become reviewed project plans.
 - [ ] **Smarter model economics** — measured speed, token usage and budget-aware routing, with local models handling suitable work.
 - [ ] **Jarvis MCP and business tools** — scoped calendar, email and external application capabilities.
 - [ ] **Concept-to-app delivery** — briefs, architecture, artwork, implementation, tests and reviewable builds.
 - [ ] **Evaluated local improvement** — reviewed training examples and separate fine-tuning/evaluation workflows.
 - [ ] **A distributable Mac app** — bundled dependencies, signing, notarization and a simpler first-run experience.
 
-Saved history is already available; semantic memory and local weight training are not yet implemented. Provider adapters and the task ledger are present; the complete autonomous office is still ahead.
+Saved history is already available; semantic memory and local weight training are not yet implemented. Live debates, local Projects planning, provider adapters and the task ledger are present; the complete autonomous office is still ahead.
 
 ## Follow the build
 
