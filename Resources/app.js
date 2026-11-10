@@ -4,8 +4,9 @@ const native=payload=>window.webkit?.messageHandlers.jarvis.postMessage(payload)
 const storage={get(k,f){try{return JSON.parse(localStorage.getItem('jarvis.'+k))??f}catch{return f}},set(k,v){localStorage.setItem('jarvis.'+k,JSON.stringify(v))}};
 let streamingVoice=false;let managerModel='';let claudeConnected=false;let claudeModel='claude-sonnet-5-5';
 let taskActive=false,mouthCues=[],audioTime=0,audioTimeStamp=0;
-let state='idle',busy=false,spoken=storage.get('spoken',true),motion=storage.get('motion',true),conversationActive=false,audioLevel=0,voiceBackend=storage.get('voiceBackend','local');
-if(!storage.get('lunaFrontV1',false)){storage.set('brain','luna');voiceBackend='local';storage.set('voiceBackend','local');storage.set('lunaFrontV1',true)}
+let state='idle',busy=false,spoken=storage.get('spoken',true),motion=storage.get('motion',true),conversationActive=false,audioLevel=0,voiceBackend=storage.get('voiceBackend','live');
+if(!storage.get('lunaFrontV1',false)){storage.set('brain','luna');storage.set('lunaFrontV1',true)}
+if(!storage.get('liveVoiceV1',false)){voiceBackend='live';storage.set('voiceBackend','live');storage.set('liveVoiceV1',true)}
 if(!storage.get('voiceFirstV1',false)){spoken=true;storage.set('spoken',true);storage.set('voiceFirstV1',true)}
 let liveDrafts={user:'',assistant:''};
 let messages=storage.get('messages',[]),projects=storage.get('projects',[]),voices=storage.get('voices',{Jarvis:'bm_lewis',Claude:'bm_george',Grok:'am_michael',Local:'af_sarah',Designer:'bf_emma',Manager:'bm_daniel'});
@@ -78,7 +79,8 @@ window.receive=({event,data})=>{
  case'managerModel':managerModel=data||'';renderVoices();break;
  case'claudeStatus':claudeConnected=!!(data&&data.connected);if(data&&data.model)claudeModel=data.model;renderVoices();break;
  case'taskResult':taskActive=false;$('stopTask').hidden=true;messages.push({role:'assistant',text:(data.success?'Task completed.\n\n':'Task needs attention.\n\n')+data.text});saveMessages();notice(data.success?'Background task finished. Open Conversation for the result.':'Background task needs attention. Open Conversation.');break;
- case'voiceStreaming':streamingVoice=!!data;setState(state);if(data)$('connection').textContent='Live voice · Luna backend';break;
+ case'inputLevel':$('inputMeter').value=Number(data)||0;break;
+ case'voiceStreaming':streamingVoice=!!data;$('inputMeter').hidden=!data;setState(state);if(data)$('connection').textContent='Live voice · Luna backend';break;
  case'cloudVoiceConfigured':if(data){voiceBackend='live';storage.set('voiceBackend','live');$('voiceBackend').value='live';notice('API voice connected. Start a conversation to use streaming audio.')}break;
  case'voiceBackend':voiceBackend=data;storage.set('voiceBackend',data);$('voiceBackend').value=data;break;
  case'liveDelta':liveDrafts[data.role]=(liveDrafts[data.role]||'')+data.text;$('liveTranscript').textContent=liveDrafts[data.role];break;

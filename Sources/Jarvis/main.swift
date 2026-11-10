@@ -645,7 +645,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         let live = liveVoice; liveVoice = nil; live?.stop()
         stopRecording(); audio?.stop(); audio = nil; outputMeter?.invalidate(); outputMeter = nil; send("audioLevel", 0); send("mouthCues", [])
         if cancelReply { brain.cancel(); tasks["chat"]?.terminate(); tasks["chat"] = nil; localTask?.cancel(); localTask = nil; send("cancelled", [:]) }
-        send("voiceStreaming", false); send("conversation", ["active": false]); send("state", "idle")
+        send("inputLevel", 0); send("voiceStreaming", false); send("conversation", ["active": false]); send("state", "idle")
     }
     func interruptConversation() {
         guard conversationActive else { return }
@@ -680,6 +680,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
                 guard let self = self, self.liveVoice === live else { return }
                 self.send(final ? "liveMessage" : "liveDelta", ["role": role, "text": text])
             }
+            live.onInputLevel = { [weak self, weak live] value in guard let self = self, self.liveVoice === live else { return }; self.send("inputLevel", value) }
             live.onLevel = { [weak self, weak live] value in guard let self = self, self.liveVoice === live else { return }; self.send("audioLevel", value) }
             live.onFailure = { [weak self, weak live] message in
                 guard let self = self, self.liveVoice === live else { return }

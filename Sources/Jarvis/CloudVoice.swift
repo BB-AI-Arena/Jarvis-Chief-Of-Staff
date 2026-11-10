@@ -6,6 +6,9 @@ final class CloudVoice {
     var onState: ((String) -> Void)?
     var onText: ((String, String, Bool) -> Void)?
     var onLevel: ((Double) -> Void)?
+    var onInputLevel: ((Double) -> Void)?
+    private var outputActivity = VoiceActivity()
+    private var displayedState = ""
     var onFailure: ((String) -> Void)?
     var onDelegate: ((String, String, @escaping (String) -> Void) -> Void)?
     private let engine = AVAudioEngine()
@@ -22,8 +25,6 @@ final class CloudVoice {
     private var mixerTap = false
     private var playbackGeneration = UUID()
     private var queuedBuffers = 0
-    private var speaking = false
-    private var lastOutputActivity: TimeInterval = 0
     private var dialogue: [[String: String]] = []
     private var drafts: [String: String] = [:]
     private var lastRole: String?
@@ -49,7 +50,7 @@ final class CloudVoice {
         request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
         let network = URLSession(configuration: .ephemeral); self.network = network
         let ws = network.webSocketTask(with: request); socket = ws; ws.resume()
-        onState?("connecting")
+        setState("connecting")
         receiver = Task { [weak self] in
             do {
                 while !Task.isCancelled {
@@ -73,6 +74,14 @@ final class CloudVoice {
             self.fail("Streaming voice did not become ready in time.")
         }
     }
+    private func audioDiagnostic(_ text: String) {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis/audio-diagnostic.txt")
+        try? text.write(to: url, atomically: true, encoding: .utf8)
+    }
+    private func setState(_ state: String) {
+        guard displayedState != state else { return }
+        displayedState = state; onState?(state)
+    }
     private func write(_ event: [String: Any]) {
         guard !stopped, let data = try? JSONSerialization.data(withJSONObject: event), let text = String(data: data, encoding: .utf8), let ws = socket else { return }
         wire.async { [weak self] in
@@ -93,7 +102,7 @@ final class CloudVoice {
         case "session.started":
             guard !ready else { return }; ready = true
             do {
-                try startAudio(); onState?("listening")
+                try startAudio(); setState("listening")
                 if greeting { commentary("Greet the caller now. Say you are at their service, then listen.") }
             } catch { fail("The microphone or streaming audio output could not start.") }
         case "session.output_audio.delta":
@@ -146,17 +155,60 @@ final class CloudVoice {
     private func startAudio() throws {
         engine.attach(player); engine.connect(player, to: engine.mainMixerNode, format: outputFormat)
         try engine.inputNode.setVoiceProcessingEnabled(true)
-        let inputFormat = engine.inputNode.outputFormat(forBus: 0)
+        // Request the processed mono microphone stream rather than downmixing the
+        // voice-processing aggregate device's microphone/reference channels.
+        let hardwareFormat = engine.inputNode.outputFormat(forBus: 0)
+        guard hardwareFormat.sampleRate > 0,
+              let inputFormat = AVAudioFormat(standardFormatWithSampleRate: hardwareFormat.sampleRate, channels: 1) else {
+            throw NSError(domain: "JarvisLive", code: 1)
+        }
+        audioDiagnostic("Input format: " + inputFormat.description)
+        var meterAt: TimeInterval = 0
+        var reportAt: TimeInterval = 0
+        var peakInput: Double = 0
+        var inputFrames = 0
+        var rawPeak: Float = 0
+        var taps = 0
         guard inputFormat.sampleRate > 0, let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true), let converter = AVAudioConverter(from: inputFormat, to: pcmFormat) else { throw NSError(domain: "JarvisLive", code: 1) }
         engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self, !self.stopped, self.ready else { return }
+            taps += 1
+            if let channels = buffer.floatChannelData {
+                for channel in 0..<Int(buffer.format.channelCount) {
+                    for index in stride(from: 0, to: Int(buffer.frameLength), by: 8) {
+                        rawPeak = max(rawPeak, abs(channels[channel][index]))
+                    }
+                }
+            }
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 24000 / inputFormat.sampleRate) + 64
             guard let converted = AVAudioPCMBuffer(pcmFormat: pcmFormat, frameCapacity: capacity) else { return }
             var supplied = false, error: NSError?
             converter.convert(to: converted, error: &error) { _, status in
                 if supplied { status.pointee = .noDataNow; return nil }; supplied = true; status.pointee = .haveData; return buffer
             }
-            guard error == nil, converted.frameLength > 0, let samples = converted.int16ChannelData?[0] else { return }
+            guard error == nil, converted.frameLength > 0, let samples = converted.int16ChannelData?[0] else {
+                if taps % 100 == 1 { self.audioDiagnostic("Conversion failed: \(String(describing: error)) input=\(inputFormat) frames=\(buffer.frameLength) converted=\(converted.frameLength) rawPeak=\(rawPeak)") }
+                return
+            }
+            var energy: Double = 0
+            for index in 0..<Int(converted.frameLength) {
+                let sample = Double(samples[index]) / 32768
+                energy += sample * sample
+            }
+            let rms = sqrt(energy / Double(converted.frameLength))
+            let now = ProcessInfo.processInfo.systemUptime
+            peakInput = max(peakInput, rms); inputFrames += Int(converted.frameLength)
+            if now - meterAt > 0.1 {
+                meterAt = now
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, !self.stopped else { return }
+                    self.onInputLevel?(min(1, rms * 12))
+                }
+            }
+            if now - reportAt > 5 {
+                self.audioDiagnostic("Input=\(inputFormat) taps=\(taps) frames=\(inputFrames) rawPeak=\(rawPeak) convertedRMS=\(peakInput)")
+                reportAt = now; peakInput = 0; inputFrames = 0; rawPeak = 0
+            }
             let data = Data(bytes: samples, count: Int(converted.frameLength) * 2)
             self.write(["type": "session.input_audio.append", "audio": data.base64EncodedString()])
         }
@@ -165,23 +217,23 @@ final class CloudVoice {
             var energy: Float = 0
             let count = Int(buffer.frameLength)
             for i in stride(from: 0, to: count, by: 8) { energy += samples[i]*samples[i] }
-            let level = min(1,Double(sqrt(energy / Float(max(1,count/8))))*5)
-            let now = Date().timeIntervalSinceReferenceDate
+            let rms = Double(sqrt(energy / Float(max(1,count/8))))
+            let level = min(1, rms * 5)
+            let now = ProcessInfo.processInfo.systemUptime
             let hot = level > 0.025
             let elapsed = now-self.lastLevelPublish
             let hotChanged = hot != (self.lastPublishedLevel > 0.025)
             let changed = abs(level-self.lastPublishedLevel) >= 0.03 || hotChanged
             // The mixer tap is about 47 Hz. Speech edges publish immediately; the orb otherwise updates at 10-20 Hz.
-            guard hotChanged || (changed && elapsed >= 0.05) || elapsed >= 0.1 else { return }
-            self.lastLevelPublish = now; self.lastPublishedLevel = level
+            let publish = hotChanged || (changed && elapsed >= 0.05) || elapsed >= 0.1
+            if publish { self.lastLevelPublish = now; self.lastPublishedLevel = level }
             DispatchQueue.main.async { [weak self] in
-                guard let self = self, !self.stopped else { return }; self.onLevel?(level)
-                if level > 0.025 {
-                    self.lastOutputActivity = now
-                    if !self.speaking { self.speaking = true; self.onState?("speaking") }
-                } else if self.speaking, now-self.lastOutputActivity > 0.25 {
-                    self.speaking = false; self.onState?("listening"); self.flushTranscript("assistant")
-                }
+                guard let self = self, !self.stopped else { return }
+                if publish { self.onLevel?(level) }
+                let wasSpeaking = self.displayedState == "speaking"
+                let speaking = self.outputActivity.update(rms: rms, at: now)
+                self.setState(speaking ? "speaking" : "listening")
+                if wasSpeaking && !speaking { self.flushTranscript("assistant") }
             }
         }
         mixerTap = true
@@ -253,10 +305,10 @@ final class CloudVoice {
         idleWork?.cancel(); idleWork = nil
     }
     private func flushPlayback() {
-        playbackGeneration = UUID(); queuedBuffers = 0; speaking = false; disarmPlayback(); player.stop(); onLevel?(0)
+        playbackGeneration = UUID(); queuedBuffers = 0; outputActivity = VoiceActivity(); disarmPlayback(); player.stop(); onLevel?(0)
     }
     func interrupt() {
-        flushPlayback(); onState?("listening")
+        flushPlayback(); setState("listening")
         write(["type": "session.instructions.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": "Stop speaking now and listen to the user's next input."])
     }
     func sendText(_ text: String) {

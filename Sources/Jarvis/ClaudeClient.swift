@@ -13,7 +13,7 @@ enum ClaudeClient {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/models?limit=1")!)
         request.httpMethod = "GET"
         request.timeoutInterval = 20
-        authorize(request, apiKey)
+        authorize(&request, apiKey)
         URLSession.shared.dataTask(with: request) { _, response, _ in
             let ok = (response as? HTTPURLResponse)?.statusCode == 200
             DispatchQueue.main.async { completion(ok) }
@@ -25,7 +25,7 @@ enum ClaudeClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "content-type")
-        authorize(request, apiKey)
+        authorize(&request, apiKey)
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 1200,

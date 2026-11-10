@@ -7,6 +7,8 @@ swiftc Sources/Jarvis/VoiceTurn.swift tests/voice_turns/main.swift -o .build/che
 .build/check-voice-turns
 swiftc Sources/Jarvis/RouteDecision.swift tests/routing/main.swift -o .build/check-routing
 .build/check-routing
+swiftc Sources/Jarvis/VoiceActivity.swift tests/voice_activity/main.swift -o .build/check-voice-activity
+.build/check-voice-activity
 swiftc Sources/Jarvis/TaskLedger.swift tests/ledger/main.swift -o .build/check-ledger
 .build/check-ledger
 swiftc Sources/Jarvis/ClaudeClient.swift tests/claude/main.swift -o .build/check-claude
