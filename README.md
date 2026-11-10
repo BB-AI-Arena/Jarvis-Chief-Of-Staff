@@ -29,6 +29,12 @@ That is the direction of **Jarvis-Chief-Of-Staff**: a personal AI headquarters w
 
 **Already in the source:** streaming voice, local model support, an animated boardroom, provider adapters, approval-based task suggestions, a persistent task ledger and an interactive file graph. This is an actively developed source build; provider seats require configuration, and the larger autonomous office is still being built.
 
+## See the actual app
+
+<img src="docs/screenshots/jarvis-home.jpg" alt="Actual Jarvis macOS development app showing the portrait-first home, navigation and voice conversation controls" width="100%" />
+
+*Captured from the running macOS development app. This is the real interface, not a mockup.*
+
 ## A presence you can talk to
 
 | Experience | What makes it Jarvis |
@@ -46,9 +52,9 @@ That is the direction of **Jarvis-Chief-Of-Staff**: a personal AI headquarters w
 
 ## Your AI boardroom
 
-<img src="Resources/board/boardroom.jpg" alt="Cinematic boardroom backdrop used by the Jarvis interface; director portraits are separate animated layers in the app" width="100%" />
+<img src="docs/screenshots/jarvis-boardroom.jpg" alt="Actual Jarvis app showing the full Board of Directors, all six character seats, provider labels and the task table" width="100%" />
 
-*Boardroom backdrop from the application. Individual director portraits are layered and animated in the interface.*
+*The full boardroom in the running development app: all six directors, their connection labels and the task table. Availability reflects the configuration at capture time; some seats are not connected. Screenshots show a development build and may include visual updates ahead of the published source.*
 
 The board gives each specialist a seat, a persona and a clear responsibility. Connection indicators distinguish configured providers from seats that are still waiting for a backend.
 
