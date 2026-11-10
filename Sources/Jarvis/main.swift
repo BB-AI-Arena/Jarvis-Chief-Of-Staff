@@ -48,6 +48,10 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     var quitting = false
     var managerModel: String?
     var knownLocalModels: [String] = []
+    var claudeModel = ClaudeClient.defaultModel
+    var claudeConnected = false
+    var claudeTaskID: String?
+    var claudeRequest: URLSessionDataTask?
     var project: URL { URL(fileURLWithPath: Bundle.main.object(forInfoDictionaryKey: "JarvisProjectRoot") as? String ?? FileManager.default.currentDirectoryPath) }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -56,6 +60,10 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         if let stored = try? String(contentsOf: support.appendingPathComponent("manager-model.txt"), encoding: .utf8) {
             managerModel = OperationsManager.resolve(stored: stored, advertised: [])
         }
+        if let stored = try? String(contentsOf: support.appendingPathComponent("claude-model.txt"), encoding: .utf8), let model = ClaudeClient.sanitize(stored) {
+            claudeModel = model
+        }
+        refreshClaude(announce: false)
         brain.warm()
         NSApp.setActivationPolicy(.regular)
         let menu = NSMenu()
@@ -108,6 +116,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool { showWorkspace(); return true }
     func applicationWillTerminate(_ notification: Notification) {
         quitting = true
+        claudeRequest?.cancel()
         publishTasks(TaskLedger.interruptRunning(ledger.load(), at: TaskLedger.timestamp()))
         brain.cancel(); liveVoice?.stop(); for process in tasks.values { process.terminate() }; voiceProcess?.terminate(); stopRecording(); outputMeter?.invalidate()
     }
@@ -130,6 +139,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             send("ready", ["voiceReady": voiceReady, "root": root?.path ?? ""]); send("conversation", ["active": conversationActive])
             publishTasks(ledger.load(), save: false)
             send("managerModel", managerModel ?? "")
+            send("claudeStatus", ["connected": claudeConnected, "model": claudeModel])
             if message.webView === web, !startupScheduled {
                 startupScheduled = true
                 let backend = body["backend"] as? String ?? "live"
@@ -162,8 +172,10 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             else { localChat(prompt, history: body["history"] as? String ?? "", model: model) }
         }
         case "models": localModels()
-        case "stopTask": stopWorker(body["id"] as? String)
+        case "stopTask": stopAssigned(body["id"] as? String)
         case "setManagerModel": storeManagerModel(body["model"] as? String ?? "")
+        case "configureClaude": configureClaude()
+        case "setClaudeModel": storeClaudeModel(body["model"] as? String ?? "")
         case "configureCloudVoice": configureCloudVoice()
         case "cancel": endConversation(cancelReply: true)
         case "speak": if let text = body["text"] as? String {
@@ -265,7 +277,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         }
     }
     func delegateWork(_ task: String, director: String, liveUpdate: ((String) -> Void)? = nil) {
-        guard tasks["work"] == nil else {
+        if director == "operations", tasks["work"] != nil {
             let message = "There is already a task running. Let’s let that finish before changing the same workspace."
             if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
             return
@@ -274,6 +286,10 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         let parentID = UUID().uuidString
         var records = ledger.load()
         records.insert(TaskRecord(id: parentID, state: "proposed", verified: false, owner: director, parentID: nil, createdAt: now, updatedAt: now, resultSummary: "", title: String(task.prefix(500))), at: 0)
+        if director == "technology" {
+            assignClaude(task, parentID: parentID, records: &records, liveUpdate: liveUpdate)
+            return
+        }
         if director != "operations" {
             records[0].state = "failed"
             records[0].resultSummary = "not connected"
@@ -306,6 +322,100 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         let message = "I've assigned this to the Director of Operations. I'll keep talking and report what comes back."
         if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]) }
         startWorker(task, parentID: parentID, liveUpdate: liveUpdate)
+    }
+    func assignClaude(_ task: String, parentID: String, records: inout [TaskRecord], liveUpdate: ((String) -> Void)?) {
+        guard claudeConnected, let apiKey = ClaudeCredential.read() else {
+            records[0].state = "failed"
+            records[0].resultSummary = "not connected"
+            publishTasks(records)
+            let message = "That belongs with the Chief Technology Officer. That seat is not connected, so I have not started the work."
+            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
+            return
+        }
+        guard claudeRequest == nil else {
+            records[0].state = "failed"
+            records[0].resultSummary = "A Claude review is already running."
+            publishTasks(records)
+            let message = records[0].resultSummary
+            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
+            return
+        }
+        let now = TaskLedger.timestamp()
+        let taskID = UUID().uuidString
+        claudeTaskID = taskID
+        records[0].state = "running"
+        records.insert(TaskRecord(id: taskID, state: "running", verified: false, owner: claudeModel, parentID: parentID, createdAt: now, updatedAt: now, resultSummary: "", title: String(task.prefix(500))), at: 1)
+        publishTasks(records)
+        let message = "I've assigned this to the Chief Technology Officer. I'll keep talking and report the review."
+        if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
+        claudeRequest = ClaudeClient.review(task, model: claudeModel, apiKey: apiKey) { [weak self] text in
+            guard let self = self else { return }
+            self.claudeRequest = nil
+            if self.quitting { return }
+            if self.ledger.load().first(where: { $0.id == taskID })?.state == "cancelled" { return }
+            if let text {
+                self.updateTask(taskID, state: "completed", summary: String(text.prefix(2000)))
+                self.send("taskResult", ["text": text, "success": true])
+                liveUpdate?("The Chief Technology Officer finished the review. " + String(text.prefix(4000)))
+            } else {
+                self.updateTask(taskID, state: "failed", summary: "Claude did not return a review.")
+                self.send("taskResult", ["text": "Claude did not return a review.", "success": false])
+                liveUpdate?("The Chief Technology Officer did not return a review.")
+            }
+            self.claudeTaskID = nil
+        }
+    }
+    func refreshClaude(announce: Bool) {
+        guard let apiKey = ClaudeCredential.read() else {
+            claudeConnected = false
+            send("claudeStatus", ["connected": false, "model": claudeModel])
+            return
+        }
+        ClaudeClient.check(apiKey) { [weak self] ok in
+            guard let self = self else { return }
+            self.claudeConnected = ok
+            self.send("claudeStatus", ["connected": ok, "model": self.claudeModel])
+            if announce { self.send("notice", ok ? "Claude is connected for the Chief Technology Officer." : "Claude did not accept that key. The seat stays not connected.") }
+        }
+    }
+    func configureClaude() {
+        let alert = NSAlert()
+        alert.messageText = "Connect Claude"
+        alert.informativeText = "The Chief Technology Officer uses an Anthropic API key. It is stored in this Mac's Keychain and is not shown to the page. If you previously saved a Claude key somewhere else, enter it here again."
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 380, height: 26))
+        field.placeholderString = "Anthropic API key"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save key")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { send("notice", "No key was entered."); return }
+        if ClaudeCredential.save(key) { refreshClaude(announce: true) }
+        else { send("notice", "The key could not be saved to Keychain.") }
+    }
+    func storeClaudeModel(_ raw: String) {
+        guard let model = ClaudeClient.sanitize(raw) else {
+            send("notice", "That Claude model id was not saved.")
+            return
+        }
+        claudeModel = model
+        try? model.write(to: support.appendingPathComponent("claude-model.txt"), atomically: true, encoding: .utf8)
+        send("claudeStatus", ["connected": claudeConnected, "model": claudeModel])
+        send("notice", "Chief Technology Officer model set to \(model).")
+    }
+    func stopAssigned(_ id: String?) {
+        if let current = claudeTaskID {
+            let parent = ledger.load().first { $0.id == current }?.parentID
+            if id == current || id == parent {
+                updateTask(current, state: "cancelled", summary: "Stopped.")
+                claudeTaskID = nil
+                claudeRequest?.cancel()
+                claudeRequest = nil
+                send("notice", "Stopped the Claude review.")
+                return
+            }
+        }
+        stopWorker(id)
     }
     func stopWorker(_ id: String? = nil) {
         guard let worker = tasks["work"] else { return }

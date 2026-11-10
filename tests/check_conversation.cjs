@@ -96,6 +96,19 @@ assert.equal(calls.at(-1).model, 'gpt-6-astra');
 w.receive({event:'managerModel', data:''});
 assert.match(w.document.querySelector('.seat.operations').textContent, /Manager model not configured/);
 console.log('PASS: the Operations manager stays unset until a verified model is saved');
+assert.match(w.document.querySelector('.seat.left').textContent, /not connected/);
+w.document.getElementById('configureClaude').click();
+assert.equal(calls.at(-1).action, 'configureClaude');
+w.receive({event:'claudeStatus', data:{connected:true, model:'claude-sonnet-5-5'}});
+const cto = w.document.querySelector('.seat.left');
+assert.match(cto.textContent, /claude-sonnet-5-5/);
+assert.match(cto.textContent, /Engineering and review\. connected/);
+assert.doesNotMatch(cto.textContent, /not connected/);
+cto.querySelector('input').value = 'claude-opus-5-5';
+[...cto.querySelectorAll('button')].find(button => button.textContent.includes('Save model')).click();
+assert.equal(calls.at(-1).action, 'setClaudeModel');
+assert.equal(calls.at(-1).model, 'claude-opus-5-5');
+console.log('PASS: the CTO seat stays disconnected until Claude reports a successful check');
 w.receive({event:'taskUpdate', data:[
   {id:'a', state:'running', verified:false, owner:'source-worker', createdAt:'t', updatedAt:'t', resultSummary:'', title:'Inspect source'},
   {id:'b', state:'completed', verified:true, owner:'source-worker', createdAt:'t', updatedAt:'t', resultSummary:'done', title:'Earlier task'}

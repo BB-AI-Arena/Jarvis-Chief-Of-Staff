@@ -9,6 +9,8 @@ swiftc Sources/Jarvis/RouteDecision.swift tests/routing/main.swift -o .build/che
 .build/check-routing
 swiftc Sources/Jarvis/TaskLedger.swift tests/ledger/main.swift -o .build/check-ledger
 .build/check-ledger
+swiftc Sources/Jarvis/ClaudeClient.swift tests/claude/main.swift -o .build/check-claude
+.build/check-claude
 node --check Resources/app.js
 npm test
 python3 -m py_compile scripts/voice.py scripts/visemes.py
