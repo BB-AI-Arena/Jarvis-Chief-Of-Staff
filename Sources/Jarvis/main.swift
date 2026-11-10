@@ -58,6 +58,11 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     var cursorRepo = CursorClient.defaultRepo
     var cursorConnected = false
     var cursorRun: (agent: String, run: String)?
+    /// Director of Projects runs on a local Ollama model chosen in the board settings. Unset until Brandon picks an installed model.
+    var projectsModel: String?
+    /// The live board debate: its ledger task id and in-flight model calls.
+    var debateTaskID: String?
+    var debateRequests: [URLSessionDataTask] = []
     /// Running seat assignments other than the CTO, keyed by director id, with the ledger task id.
     var seatRuns: [String: String] = [:]
     var seatRequests: [String: URLSessionDataTask] = [:]
@@ -76,6 +81,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         if let stored = try? String(contentsOf: support.appendingPathComponent("grok-model.txt"), encoding: .utf8), let model = GrokClient.sanitize(stored) { grokModel = model }
         if let stored = try? String(contentsOf: support.appendingPathComponent("cursor-model.txt"), encoding: .utf8), let model = CursorClient.sanitizeModel(stored) { cursorModel = model }
         if let stored = try? String(contentsOf: support.appendingPathComponent("cursor-repo.txt"), encoding: .utf8), let repo = CursorClient.sanitizeRepo(stored) { cursorRepo = repo }
+        if let stored = try? String(contentsOf: support.appendingPathComponent("projects-model.txt"), encoding: .utf8), let model = OllamaClient.sanitize(stored) { projectsModel = model }
         refreshCursor(announce: false)
         refreshGrok(announce: false)
         brain.warm()
@@ -132,6 +138,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         quitting = true
         claudeRequest?.cancel()
         seatRequests.values.forEach { $0.cancel() }
+        debateRequests.forEach { $0.cancel() }
         publishTasks(TaskLedger.interruptRunning(ledger.load(), at: TaskLedger.timestamp()))
         brain.cancel(); liveVoice?.stop(); for process in tasks.values { process.terminate() }; voiceProcess?.terminate(); stopRecording(); outputMeter?.invalidate()
     }
@@ -201,6 +208,8 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         case "setCreativeModel": storeCursorModel(body["model"] as? String ?? "")
         case "setCreativeRepo": storeCursorRepo(body["repo"] as? String ?? "")
         case "configureCursor": configureCursor()
+        case "setProjectsModel": storeProjectsModel(body["model"] as? String ?? "")
+        case "debate": startDebate(body["topic"] as? String ?? "")
         case "configureCloudVoice": configureCloudVoice()
         case "cancel": endConversation(cancelReply: true)
         case "speak": if let text = body["text"] as? String {
@@ -327,6 +336,10 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             assignCreative(task, parentID: parentID, records: &records, liveUpdate: liveUpdate)
             return
         }
+        if director == "projects" {
+            assignProjects(task, parentID: parentID, records: &records, liveUpdate: liveUpdate)
+            return
+        }
         if director != "operations" {
             records[0].resultSummary = "waiting: seat not connected"
             publishTasks(records)
@@ -422,6 +435,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     func sendSeatStatus() {
         send("grokStatus", ["connected": grokConnected, "model": grokModel])
         send("creativeStatus", ["connected": cursorConnected, "model": cursorModel, "repo": cursorRepo])
+        send("projectsStatus", ["connected": projectsModel != nil, "model": projectsModel ?? ""])
     }
     /// Shared bookkeeping for a model-backed seat assignment. `start` returns false when the seat cannot run.
     func runSeat(_ seat: String, task: String, parentID: String, records: inout [TaskRecord], owner: String, connected: Bool, liveUpdate: ((String) -> Void)?, start: (String, @escaping (String?, String?) -> Void) -> URLSessionDataTask?) {
@@ -593,6 +607,118 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         sendSeatStatus()
         send("notice", "Creative Director repository set to \(repo).")
     }
+    /// Projects work runs on the local model. It cannot browse, edit files or run commands.
+    func assignProjects(_ task: String, parentID: String, records: inout [TaskRecord], liveUpdate: ((String) -> Void)?) {
+        let model = projectsModel
+        runSeat("projects", task: task, parentID: parentID, records: &records, owner: "projects · " + (model ?? "ollama"), connected: model != nil, liveUpdate: liveUpdate) { _, done in
+            let system = Personas.system("projects", fallback: OllamaClient.projectsFallback) + "\n\nThis call is an assignment from Jarvis. You run on a local model on this Mac and cannot browse, edit files or run commands. Answer as the Director of Projects."
+            return OllamaClient.chat(task, model: model ?? "", system: system) { text in
+                done(text, text == nil ? "The local model \(model ?? "") did not answer. Check that Ollama is running and the model is installed." : nil)
+            }
+        }
+    }
+    func storeProjectsModel(_ raw: String) {
+        let url = support.appendingPathComponent("projects-model.txt")
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try? FileManager.default.removeItem(at: url)
+            projectsModel = nil; sendSeatStatus()
+            send("notice", "Director of Projects model cleared. The seat is not connected.")
+            return
+        }
+        guard let model = OllamaClient.sanitize(raw) else { send("notice", "That local model name was not saved."); return }
+        OllamaClient.models { [weak self] names in
+            guard let self = self else { return }
+            guard let names else { self.send("notice", "Ollama is not responding on this Mac, so the Projects model was not saved."); return }
+            guard names.contains(model) else { self.send("notice", "\(model) is not installed in Ollama, so it was not saved. Installed: " + (names.isEmpty ? "none" : names.joined(separator: ", ")) + "."); return }
+            self.projectsModel = model
+            try? model.write(to: url, atomically: true, encoding: .utf8)
+            self.sendSeatStatus()
+            self.send("notice", "Director of Projects now runs locally on \(model).")
+        }
+    }
+    /// Directors that can speak in a debate right now, with the call that asks each one. Order is chair preference.
+    func debateSpeakers() -> [(seat: String, model: String, ask: (String, String, @escaping (String?) -> Void) -> URLSessionDataTask)] {
+        var speakers: [(seat: String, model: String, ask: (String, String, @escaping (String?) -> Void) -> URLSessionDataTask)] = []
+        if claudeConnected, let key = ClaudeCredential.read() {
+            let model = claudeModel
+            speakers.append(("cto", model, { prompt, system, done in ClaudeClient.review(prompt, model: model, apiKey: key, system: system, completion: done) }))
+        }
+        if grokConnected, let key = GrokCredential.read() {
+            let model = grokModel
+            speakers.append(("research", model, { prompt, system, done in GrokClient.research(prompt, model: model, apiKey: key, system: system, completion: done) }))
+        }
+        if let model = projectsModel {
+            speakers.append(("projects", model, { prompt, system, done in OllamaClient.chat(prompt, model: model, system: system, completion: done) }))
+        }
+        return speakers
+    }
+    /// A live debate: each connected director answers in parallel per round, then a chair call checks for consensus. At most three rounds.
+    func startDebate(_ raw: String) {
+        guard debateTaskID == nil else { send("notice", "A board debate is already running."); return }
+        guard let topic = BoardDebate.clean(topic: raw) else { send("notice", "Give the board a question to debate."); return }
+        let speakers = debateSpeakers()
+        guard speakers.count >= 2 else {
+            let connected = speakers.map { BoardDebate.title($0.seat) }
+            send("notice", "A real debate needs at least two connected directors (Claude for the CTO, Grok for Research, or a local model for Projects). Connected now: " + (connected.isEmpty ? "none" : connected.joined(separator: ", ")) + ".")
+            return
+        }
+        let now = TaskLedger.timestamp(), taskID = UUID().uuidString
+        var records = ledger.load()
+        records.insert(TaskRecord(id: taskID, state: "running", verified: false, owner: "board", parentID: nil, createdAt: now, updatedAt: now, resultSummary: "Round 1 of up to \(BoardDebate.maxRounds)", title: String(("Board debate: " + topic).prefix(500))), at: 0)
+        publishTasks(records)
+        debateTaskID = taskID
+        send("debateStarted", ["id": taskID, "topic": topic, "seats": speakers.map { $0.seat }])
+        debateRound(1, topic: topic, turns: [], speakers: speakers, taskID: taskID)
+    }
+    func debateRound(_ round: Int, topic: String, turns: [BoardDebate.Turn], speakers: [(seat: String, model: String, ask: (String, String, @escaping (String?) -> Void) -> URLSessionDataTask)], taskID: String) {
+        guard debateTaskID == taskID, !quitting else { return }
+        var replies = [String?](repeating: nil, count: speakers.count)
+        var pending = speakers.count
+        for (index, speaker) in speakers.enumerated() {
+            let system = BoardDebate.turnSystem(persona: Personas.system(speaker.seat, fallback: "You are Jarvis's " + BoardDebate.title(speaker.seat) + "."))
+            let prompt = BoardDebate.turnPrompt(topic: topic, round: round, seat: speaker.seat, turns: turns)
+            debateRequests.append(speaker.ask(prompt, system) { [weak self] text in
+                guard let self = self, self.debateTaskID == taskID else { return }
+                replies[index] = text.map { BoardDebate.spoken($0) }.flatMap { $0.isEmpty ? nil : $0 }
+                pending -= 1
+                guard pending == 0 else { return }
+                self.debateRequests = []
+                let said = speakers.indices.compactMap { i in replies[i].map { BoardDebate.Turn(seat: speakers[i].seat, round: round, text: $0) } }
+                let silent = speakers.indices.filter { replies[$0] == nil }.map { speakers[$0].seat }
+                guard !said.isEmpty else { self.failDebate(taskID, "No director answered in round \(round). Nothing was decided."); return }
+                self.send("debateRound", ["id": taskID, "round": round, "turns": said.map { ["seat": $0.seat, "text": $0.text] }, "silent": silent])
+                self.noteTask(taskID, summary: "Round \(round) of up to \(BoardDebate.maxRounds) · " + said.map { BoardDebate.title($0.seat) }.joined(separator: ", ") + " spoke")
+                self.judgeDebate(round, topic: topic, turns: turns + said, speakers: speakers, taskID: taskID)
+            })
+        }
+    }
+    func judgeDebate(_ round: Int, topic: String, turns: [BoardDebate.Turn], speakers: [(seat: String, model: String, ask: (String, String, @escaping (String?) -> Void) -> URLSessionDataTask)], taskID: String) {
+        guard debateTaskID == taskID, let chair = speakers.first else { return }
+        let final = round >= BoardDebate.maxRounds
+        debateRequests.append(chair.ask(BoardDebate.judgePrompt(topic: topic, turns: turns, finalRound: final), BoardDebate.judgeSystem) { [weak self] raw in
+            guard let self = self, self.debateTaskID == taskID else { return }
+            self.debateRequests = []
+            let verdict = raw.flatMap { BoardDebate.verdict(from: $0) }
+            if verdict?.agreed == true || final {
+                let summary = BoardDebate.summary(topic: topic, turns: turns, verdict: verdict, rounds: round, chair: chair.model)
+                self.updateTask(taskID, state: "completed", summary: String(summary.prefix(4000)))
+                self.send("debateResult", ["id": taskID, "topic": topic, "agreed": verdict?.agreed == true, "decision": verdict?.decision ?? "The chair could not summarise the outcome.", "rounds": round, "chair": chair.model, "transcript": BoardDebate.transcript(turns)])
+                self.endDebate()
+            } else {
+                self.debateRound(round + 1, topic: topic, turns: turns, speakers: speakers, taskID: taskID)
+            }
+        })
+    }
+    func failDebate(_ taskID: String, _ message: String) {
+        updateTask(taskID, state: "failed", summary: message)
+        send("debateResult", ["id": taskID, "failed": true, "agreed": false, "decision": message])
+        endDebate()
+    }
+    func endDebate() {
+        debateRequests.forEach { $0.cancel() }
+        debateRequests = []
+        debateTaskID = nil
+    }
     func configureClaude() {
         let alert = NSAlert()
         alert.messageText = "Connect Claude"
@@ -619,6 +745,13 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         send("notice", "Chief Technology Officer model set to \(model).")
     }
     func stopAssigned(_ id: String?) {
+        if let current = debateTaskID, id == current {
+            updateTask(current, state: "cancelled", summary: "Debate stopped.")
+            endDebate()
+            send("debateStopped", ["id": current])
+            send("notice", "Stopped the board debate.")
+            return
+        }
         for (seat, current) in seatRuns {
             let parent = ledger.load().first { $0.id == current }?.parentID
             if id == current || id == parent {

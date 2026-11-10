@@ -49,7 +49,7 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .seat .fx{inset:0}
 .seat.left .fx{left:calc(var(--ex) - var(--ew)/2);top:calc(var(--ey) - var(--eh)/2);width:var(--ew);height:var(--eh);overflow:hidden;border-radius:3px}
 .seat.left .fx::after{content:"";position:absolute;top:0;bottom:0;width:26%;background:linear-gradient(90deg,transparent,#fff6d0cc,transparent);mix-blend-mode:screen;animation:scan var(--scan,2.2s) ease-in-out infinite alternate}
-.seat.right .fx{left:calc(var(--ex) - var(--ew)/1.6);top:calc(var(--ey) - var(--eh)/1.4);width:calc(var(--ew)*1.25);height:calc(var(--eh)*1.4);border-radius:50%;background:radial-gradient(closest-side,#c79cffaa,transparent);mix-blend-mode:screen;animation:brain var(--pulse,2.6s) ease-in-out infinite}
+.seat.right .fx{left:calc(var(--fxx) - var(--fxw)/2);top:calc(var(--fxy) - var(--fxh)/2);width:var(--fxw);height:var(--fxh);border-radius:50%;background:radial-gradient(closest-side,#c79cffaa,transparent);mix-blend-mode:screen;animation:brain var(--pulse,2.6s) ease-in-out infinite}
 .seat.operations .fx{left:70%;top:12%;width:20%;height:9%;animation:orbit var(--orbit,7s) linear infinite}
 .seat.operations .fx::before{content:"";position:absolute;inset:30% 20%;border-radius:40%;background:#b8c4cf;box-shadow:0 0 0 2px #3b4650,0 0 8px #7fd8ff}
 .seat.operations .fx::after{content:"";position:absolute;left:0;right:0;top:12%;height:12%;border-radius:4px;background:linear-gradient(90deg,#dfe8f0aa 0 30%,transparent 30% 70%,#dfe8f0aa 70%);animation:rotor .12s linear infinite}
@@ -93,6 +93,7 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .board-controls{position:absolute;right:1.5%;bottom:2%;z-index:75;display:flex;gap:8px;align-items:center}
 .debate-banner{padding:4px 8px;border-radius:8px;background:#2b1d05e6;border:1px solid #ffcf6d88;color:#ffdf9a;font-size:10px;letter-spacing:.06em}
 .debate-banner[hidden]{display:none}
+.debate-topic{width:min(34vw,320px);padding:6px 10px;border-radius:8px;border:1px solid #7fd8ff55;background:#06111ccc;color:#e6f4ff;font:inherit;font-size:12px}
 @keyframes breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-1.1%) scale(1.006,1.012)}}
 @keyframes look{0%,58%,100%{transform:rotate(0)}64%,72%{transform:rotate(-2.2deg) translateX(-1.2%)}78%,86%{transform:rotate(1.8deg) translateX(1%)}92%{transform:rotate(0)}}
 @keyframes blink{0%,93%,100%{transform:scaleY(0)}95.5%{transform:scaleY(1)}}

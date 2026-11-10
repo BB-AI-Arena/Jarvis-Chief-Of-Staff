@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const native=payload=>window.webkit?.messageHandlers.jarvis.postMessage(payload);
 const storage={get(k,f){try{return JSON.parse(localStorage.getItem('jarvis.'+k))??f}catch{return f}},set(k,v){localStorage.setItem('jarvis.'+k,JSON.stringify(v))}};
-let streamingVoice=false;let managerModel='';let claudeConnected=false;let claudeModel='claude-sonnet-5-5';let grokConnected=false,grokModel='grok-4.7',cursorConnected=false,cursorModel='',cursorRepo='https://github.com/BB-AI-Arena/Jarvis-Chief-Of-Staff';
+let streamingVoice=false;let managerModel='';let claudeConnected=false;let claudeModel='claude-sonnet-5-5';let projectsModel='',debateLive=false,debateQueue=Promise.resolve(),debateQueueGen=0;let grokConnected=false,grokModel='grok-4.7',cursorConnected=false,cursorModel='',cursorRepo='https://github.com/BB-AI-Arena/Jarvis-Chief-Of-Staff';
 let suggestions=[],lastTasks=[];let taskActive=false,mouthCues=[],audioTime=0,audioTimeStamp=0;
 let state='idle',busy=false,spoken=storage.get('spoken',true),motion=storage.get('motion',true),conversationActive=false,audioLevel=0,voiceBackend=storage.get('voiceBackend','live');
 if(!storage.get('lunaFrontV1',false)){storage.set('brain','luna');storage.set('lunaFrontV1',true)}
@@ -27,9 +27,10 @@ function renderCards(tab='overview'){
  $('workspaceCards').innerHTML=cards.map(([icon,title,sub,detail])=>`<div class="task-card"><div class="icon">${icon}</div><div><h3>${title}</h3><p>${escape(sub)}</p><small>${escape(detail)}</small></div></div>`).join('')
 }
 // Boardroom: each seat is a layered character. Positions are percentages of the 16:9 stage.
+// seatArt eye boxes [cx,cy,w,h] are % of each webp, measured from the emissive eye pixels (2026-11-09); fx is Research's brain glow.
 const boardLayout={head:{x:50,b:47,h:27,z:10},left:{x:35,b:41,h:30,z:12},right:{x:65,b:41,h:30,z:12},projects:{x:22,b:25,h:38,z:20},operations:{x:83,b:24,h:40,z:20},creative:{x:8.5,b:9,h:44,z:30}};
 const seatAlias={jarvis:'jarvis',head:'jarvis',chief:'jarvis',cto:'cto',technology:'cto',claude:'cto',research:'research',grok:'research',operations:'operations',ops:'operations',astra:'operations',local:'operations',creative:'creative',designer:'creative',projects:'projects',manager:'projects'};
-const seatArt={jarvis:{eye:[50,26,34,7],wave:[50,39],c:'#39d6ff'},cto:{eye:[57,31,40,7],wave:[57,38],c:'#ffc35a'},research:{eye:[54,18,32,15],wave:[52,30],c:'#b58cff'},operations:{eye:[48,25.5,18,7],wave:[48,33],c:'#7fd8ff'},creative:{eye:[48.5,28.5,24,7],wave:[49,36],c:'#ff5fd2'},projects:{eye:[49,21.5,24,4.5],wave:[49,28],c:'#5dffa8'}};
+const seatArt={jarvis:{eye:[50,26,34,7],wave:[50,39],c:'#39d6ff'},cto:{eye:[60,31.4,40,7],wave:[60,38],c:'#ffc35a'},research:{eye:[56.5,24.4,24,6],fx:[54,17.8,40,21],wave:[52,30],c:'#b58cff'},operations:{eye:[48,25.5,18,7],wave:[48,33],c:'#7fd8ff'},creative:{eye:[48.5,28.5,24,7],wave:[49,36],c:'#ff5fd2'},projects:{eye:[49,21.5,24,4.5],wave:[49,28],c:'#5dffa8'}};
 const rand=(a,b)=>(a+Math.random()*(b-a)).toFixed(2);
 function boardSeats(){return [
  {key:'Jarvis',seat:'head',id:'jarvis',title:'Chief of Staff',model:'GPT-6 Luna',status:'Chairs the table and does not execute tasks.',connected:true},
@@ -37,7 +38,7 @@ function boardSeats(){return [
  {key:'Grok',seat:'right',id:'research',title:'Director of Research',model:grokConnected?grokModel:'not connected',status:grokConnected?'Grok research. connected':'Grok research. not connected',connected:grokConnected},
  {key:'Local',seat:'operations',id:'operations',title:'Director of Operations',model:'GPT Astra',status:managerModel?`Manager ${managerModel}. Hires local models as workers.`:'Hires local models as workers. Manager model not configured.',connected:true},
  {key:'Designer',seat:'creative',id:'creative',title:'Creative Director',label:'Creative Director · Cursor',model:cursorConnected?'Cursor · '+(cursorModel||'default model'):'Cursor · not connected',status:cursorConnected?'Cloud agents on '+cursorRepo.replace(/^https:\/\//,''):'Cloud agents. not connected',connected:cursorConnected},
- {key:'Manager',seat:'projects',id:'projects',title:'Director of Projects',model:'not connected',status:'Planning. not connected',connected:false}
+ {key:'Manager',seat:'projects',id:'projects',title:'Director of Projects',model:projectsModel?'Ollama · '+projectsModel:'not connected',status:projectsModel?'Planning on this Mac. connected':'Planning. Local model not set',connected:!!projectsModel}
 ]}
 function modelField(el,label,value,placeholder,aria,buttonText,action,key='model'){
  const field=document.createElement('label');field.className='manager-field';field.textContent=label;
@@ -52,6 +53,7 @@ function renderVoices(){
   const el=document.createElement('section');el.className='seat '+seat.seat+(seat.connected?'':' disconnected')+(open===seat.id?' open':'');el.dataset.seat=seat.id;
   const vars={'--x':pos.x+'%','--b':pos.b+'%','--h':pos.h+'%','--z':pos.z,'--c':art.c,'--ex':art.eye[0]+'%','--ey':art.eye[1]+'%','--ew':art.eye[2]+'%','--eh':art.eye[3]+'%','--wx':art.wave[0]+'%','--wy':art.wave[1]+'%',
    '--breath':rand(3.4,5.2)+'s','--bdelay':'-'+rand(0,5)+'s','--look':rand(8,15)+'s','--ldelay':'-'+rand(0,12)+'s','--blink':rand(3.5,7.5)+'s','--blinkd':'-'+rand(0,6)+'s','--busy':rand(2.6,5.4)+'s','--busyd':'-'+rand(0,5)+'s','--scan':rand(1.6,2.8)+'s','--pulse':rand(2,3.4)+'s','--orbit':rand(6,9)+'s','--fill':rand(4,7)+'s'};
+  if(art.fx)Object.assign(vars,{'--fxx':art.fx[0]+'%','--fxy':art.fx[1]+'%','--fxw':art.fx[2]+'%','--fxh':art.fx[3]+'%'});
   for(const [k,v] of Object.entries(vars))el.style.setProperty(k,String(v));
   if(seat.id==='creative')el.style.setProperty('--busy',rand(.8,1.1)+'s');
   el.innerHTML=`<div class="figure" role="button" tabindex="0" aria-label="${escape(seat.title)} settings"><div class="bob"><div class="sway"><div class="char"><img src="board/${seat.id}.webp" alt="${escape(seat.title)}" draggable="false"><i class="glow"></i><i class="blink"></i><i class="fx"></i><i class="wave"><b></b><b></b><b></b><b></b><b></b></i></div></div></div></div><div class="bubble" aria-live="polite"></div><div class="plate"><h2>${escape(seat.title)}</h2><p class="seat-model">${escape(seat.model)}</p><p class="seat-status">${escape(seat.status)}</p></div>`;
@@ -62,6 +64,7 @@ function renderVoices(){
   if(seat.seat==='right')modelField(controls,'Grok model',grokModel,'grok-4.7','Grok model id','Save model','setGrokModel');
   if(seat.seat==='creative'){modelField(controls,'Target repository',cursorRepo,'https://github.com/owner/repo','Creative Director repository','Save repository','setCreativeRepo','repo');modelField(controls,'Cursor model (blank = default)',cursorModel,'default model','Creative Director Cursor model id','Save model','setCreativeModel')}
   if(seat.seat==='operations')modelField(controls,'Manager model',managerModel,'manager model not configured','Operations manager model','Save manager','setManagerModel');
+  if(seat.seat==='projects')modelField(controls,'Local model (Ollama, blank = disconnect)',projectsModel,'e.g. gemma4:latest','Director of Projects local model','Save model','setProjectsModel');
   const close=document.createElement('button');close.type='button';close.className='close';close.textContent='Close';close.onclick=()=>el.classList.remove('open');controls.append(close);
   controls.querySelector('select').onchange=e=>{voices[seat.key]=e.target.value;storage.set('voices',voices)};
   controls.querySelector('.preview').onclick=()=>native({action:'speak',text:seat.key==='Jarvis'?'Good evening. Everything is in hand. Shall we turn that rather ambitious idea into a plan?':`Hello. I speak for the ${seat.title}.`,voice:voices[seat.key]});
@@ -82,9 +85,9 @@ function setBoardSpeaker(el,text){
  root.querySelectorAll('.seat').forEach(s=>{if(s===el)return;const mx=parseFloat(s.style.getPropertyValue('--x'))||50;const dir=Math.sign(x-mx)||0;s.classList.add('listening');s.style.setProperty('--lean',(dir*2.4)+'deg');s.style.setProperty('--leanx',(dir*3)+'%')});
 }
 function playBoardDebate(turns,options={}){
- const {agreement=true,summary='',demo=false,pace=1}=options;
+ const {agreement=true,summary='',demo=false,pace=1,banner=''}=options;
  const token=++debateToken,root=$('voiceGrid'),ring=$('agreedRing');
- root.classList.remove('agreed');ring.hidden=true;$('debateBanner').hidden=!demo;
+ root.classList.remove('agreed');ring.hidden=true;$('debateBanner').textContent=demo?'DEMO · scripted lines, not model output':banner;$('debateBanner').hidden=!(demo||banner);
  const list=(turns||[]).filter(t=>t&&t.text);
  return new Promise(resolve=>{
   let index=0;
@@ -105,7 +108,10 @@ function playBoardDebate(turns,options={}){
   step();
  });
 }
-function stopBoardDebate(){debateToken++;clearBoardTalk();$('voiceGrid').classList.remove('debating','agreed');$('agreedRing').hidden=true;$('debateBanner').hidden=true}
+function stopBoardDebate(){debateToken++;debateQueueGen++;debateQueue=Promise.resolve();clearBoardTalk();$('voiceGrid').classList.remove('debating','agreed');$('agreedRing').hidden=true;$('debateBanner').hidden=true}
+// Live debates arrive round by round; each round plays after the previous one finishes.
+function queueDebate(turns,options){const gen=debateQueueGen;debateQueue=debateQueue.then(()=>gen===debateQueueGen?playBoardDebate(turns,options):false);return debateQueue}
+function updateDebateControls(){const b=$('conveneDebate');if(b){b.disabled=debateLive;b.textContent=debateLive?'Debating…':'Convene debate'}}
 window.playBoardDebate=playBoardDebate;window.stopBoardDebate=stopBoardDebate;
 const demoDebateTurns=[
  {seat:'jarvis',text:'Demo topic: should we ship the boardroom this week?'},
@@ -117,7 +123,7 @@ const demoDebateTurns=[
  {seat:'cto',text:'Fine, if live debates stay behind a flag.'},
  {seat:'jarvis',text:'Then we agree: boardroom now, debates next.'}
 ];
-function ownerLabel(owner){const o=String(owner||'').toLowerCase();if(o==='technology'||o.startsWith('claude'))return 'CTO';if(o==='research'||o.startsWith('grok'))return 'Research';if(o==='creative')return 'Creative';if(o==='projects')return 'Projects';if(o.startsWith('operations')||o==='source-worker'||o.startsWith('gpt-')||o.includes(':'))return 'Operations';return owner||'unassigned'}
+function ownerLabel(owner){const o=String(owner||'').toLowerCase();if(o==='technology'||o.startsWith('claude'))return 'CTO';if(o==='research'||o.startsWith('grok'))return 'Research';if(o==='creative')return 'Creative';if(o==='projects'||o.startsWith('projects'))return 'Projects';if(o==='board')return 'Board';if(o.startsWith('operations')||o==='source-worker'||o.startsWith('gpt-')||o.includes(':'))return 'Operations';return owner||'unassigned'}
 // Suggested tasks wait here for Brandon's approval. Nothing reaches the ledger until Approve.
 function suggestionRows(){return suggestions.map((t,i)=>`<article class="task-row suggested"><div><strong>${escape(t.title)}</strong><small><span class="chip">suggested</span>${escape(t.owner||ownerLabel(t.director))} · needs your approval</small></div><span><button type="button" data-approve="${i}">Approve</button> <button type="button" data-dismiss="${i}">Dismiss</button></span></article>`).join('')}
 function wireSuggestions(panel){
@@ -155,6 +161,11 @@ window.receive=({event,data})=>{
  case'taskSuggestion':if(data&&data.title&&!suggestions.some(t=>t.title===data.title)){suggestions.unshift({title:String(data.title),director:String(data.director||''),owner:String(data.owner||'')});suggestions=suggestions.slice(0,5);renderTasks(lastTasks)}break;
  case'managerModel':managerModel=data||'';renderVoices();break;
  case'claudeStatus':claudeConnected=!!(data&&data.connected);if(data&&data.model)claudeModel=data.model;renderVoices();break;
+ case'projectsStatus':projectsModel=data&&data.connected&&data.model?data.model:'';renderVoices();break;
+ case'debateStarted':stopBoardDebate();debateLive=true;updateDebateControls();queueDebate([{seat:'jarvis',text:'Board, the question: '+data.topic}],{agreement:false,banner:'LIVE · directors are answering'});notice('Board debate started with '+(data.seats||[]).length+' directors.');break;
+ case'debateRound':queueDebate(data.turns||[],{agreement:false,banner:'LIVE · round '+data.round+' · model output'});if((data.silent||[]).length)notice('No answer this round from: '+data.silent.join(', '));break;
+ case'debateResult':{debateLive=false;updateDebateControls();const line=data.failed?data.decision:(data.agreed?'Agreed. ':'No consensus. ')+data.decision;queueDebate([{seat:'jarvis',text:line}],{agreement:!!data.agreed,summary:data.decision,banner:data.failed?'LIVE · debate failed':'LIVE · chair: '+(data.chair||'')});if(!data.failed){messages.push({role:'assistant',text:'Board debate: '+data.topic+'\n\n'+(data.agreed?'Agreed':'No consensus')+' after '+data.rounds+' round'+(data.rounds===1?'':'s')+': '+data.decision+'\n\n'+(data.transcript||'')});saveMessages()}notice(data.failed?data.decision:'Board debate finished. The transcript is in Conversation and on the task list.');break}
+ case'debateStopped':debateLive=false;updateDebateControls();stopBoardDebate();break;
  case'grokStatus':grokConnected=!!(data&&data.connected);if(data&&data.model)grokModel=data.model;renderVoices();break;
  case'creativeStatus':cursorConnected=!!(data&&data.connected);if(data&&typeof data.model==='string')cursorModel=data.model;if(data&&data.repo)cursorRepo=data.repo;renderVoices();break;
  case'taskResult':taskActive=false;$('stopTask').hidden=true;messages.push({role:'assistant',text:(data.success?'Task completed.\n\n':'Task needs attention.\n\n')+data.text});saveMessages();notice(data.success?'Background task finished. Open Conversation for the result.':'Background task needs attention. Open Conversation.');break;
@@ -208,6 +219,8 @@ $('configureGrok').onclick=()=>native({action:'configureGrok'});
 $('configureCursor').onclick=()=>native({action:'configureCursor'});
 
 $('stopTask').onclick=()=>native({action:'stopTask'});
+$('conveneDebate').onclick=()=>{const topic=$('debateTopic').value.trim();if(!topic){notice('Give the board a question to debate.');return}native({action:'debate',topic})};
+$('debateTopic').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('conveneDebate').click()}};
 $('demoDebate').onclick=()=>playBoardDebate(demoDebateTurns,{agreement:true,summary:'Demo · boardroom now, debates next',demo:true});
 
 function mouthPose(){

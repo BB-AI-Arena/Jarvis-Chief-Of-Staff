@@ -17,6 +17,10 @@ swiftc Sources/Jarvis/GrokClient.swift tests/grok/main.swift -o .build/check-gro
 .build/check-grok
 swiftc Sources/Jarvis/CursorClient.swift tests/cursor/main.swift -o .build/check-cursor
 .build/check-cursor
+swiftc Sources/Jarvis/BoardDebate.swift tests/debate/main.swift -o .build/check-debate
+.build/check-debate
+swiftc Sources/Jarvis/OllamaClient.swift tests/ollama/main.swift -o .build/check-ollama
+.build/check-ollama
 for persona in jarvis cto research operations creative projects board-charter; do test -s "Resources/board/personas/$persona.md" || { echo "FAIL: missing persona $persona"; exit 1; }; grep -q "\"$persona\"" Sources/Jarvis/Personas.swift || { echo "FAIL: persona $persona not loadable"; exit 1; }; done
 echo "PASS: every board persona and the charter are bundled and loadable"
 node --check Resources/app.js

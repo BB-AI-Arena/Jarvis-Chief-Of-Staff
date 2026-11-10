@@ -7,15 +7,22 @@ struct RouteDecision {
     var task: String? = nil
     static let directors = ["operations", "technology", "research", "creative", "projects"]
     static let routes = ["reply", "astra", "task", "assign", "suggest"]
+    /// Strict structured-output schema for Luna. The API rejects a schema unless every property is listed in `required`,
+    /// so optional fields are required but nullable. (An earlier optional-field schema made every Luna call fail.)
+    static var outputSchema: [String: Any] {
+        ["type": "object",
+         "properties": ["route": ["type": "string", "enum": routes], "text": ["type": "string"],
+                        "director": ["type": ["string", "null"], "enum": directors + [NSNull()]], "task": ["type": ["string", "null"]]],
+         "required": ["route", "text", "director", "task"], "additionalProperties": false]
+    }
     static func decode(_ raw: String) -> RouteDecision? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("```json\n"), text.hasSuffix("```") { text = String(text.dropFirst(8).dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines) }
         else if text.hasPrefix("```\n"), text.hasSuffix("```") { text = String(text.dropFirst(4).dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines) }
         guard let data = text.data(using: .utf8), let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let route = result["route"] as? String, routes.contains(route), let answer = result["text"] as? String, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         let hinted = result["director"] as? String
-        if route == "assign" {
-            guard let hinted, directors.contains(hinted) else { return nil }
-        }
+        // A named director must be real ("jarvis" never is). A null director falls back to classify().
+        if route == "assign", let hinted, !directors.contains(hinted) { return nil }
         let director = hinted.flatMap { directors.contains($0) ? $0 : nil }
         if route == "suggest" {
             guard let task = (result["task"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !task.isEmpty else { return nil }

@@ -33,3 +33,12 @@ assert(RouteDecision.suggestion(for: suggestion!)?.title == "Draft the launch pl
 assert(RouteDecision.decode("{\"route\":\"suggest\",\"text\":\"Shall I?\"}") == nil)
 assert(RouteDecision.suggestion(for: RouteDecision(route: "reply", text: "Hello", director: nil)) == nil)
 print("PASS: a suggested task is never an assignment; it needs approval before it reaches the ledger")
+let schema = RouteDecision.outputSchema
+let properties = Set((schema["properties"] as! [String: Any]).keys)
+assert(Set(schema["required"] as! [String]) == properties, "strict structured output requires every property")
+assert(schema["additionalProperties"] as? Bool == false)
+let nullAssign = RouteDecision.decode("{\"route\":\"assign\",\"text\":\"Draft a project plan for the handyman MVP\",\"director\":null,\"task\":null}")
+assert(nullAssign != nil && RouteDecision.assignment(for: nullAssign!)?.director == "projects")
+assert(RouteDecision.decode("{\"route\":\"reply\",\"text\":\"Certainly.\",\"director\":null,\"task\":null}")?.route == "reply")
+assert(RouteDecision.decode("{\"route\":\"suggest\",\"text\":\"Shall I?\",\"director\":null,\"task\":null}") == nil)
+print("PASS: Luna's routing schema is strict (every property required, optional ones nullable) and null directors fall back to classify")
