@@ -55,7 +55,15 @@ struct RouteDecision {
 
 enum OperationsManager {
     /// Identifiers this build actually passes to the agent runtime. Nothing else is assumed.
-    static let runtimeModels = ["gpt-6-astra", "gpt-6-luna"]
+    /// gpt-6-sol was confirmed in the runtime's model/list on 2026-11-09 (default effort medium). It is the closest match to "GPT Sol 6.1".
+    static let runtimeModels = ["gpt-6-astra", "gpt-6-luna", "gpt-6-sol"]
+    static let fallbackWorker = "gpt-6-astra"
+    static let effort = "medium"
+    /// The model and runtime config the Operations worker runs with. Only runtime models can run it; a local Ollama manager cannot.
+    static func worker(manager: String?) -> (model: String, config: [String]) {
+        guard let manager, runtimeModels.contains(manager) else { return (fallbackWorker, []) }
+        return (manager, ["-c", "model_reasoning_effort=\"\(effort)\""])
+    }
     /// Spellings the owner uses for the Operations manager. Returned only when a live model list contains that exact id.
     static let managerCandidates = ["GPT Sol 6.1", "gpt-sol-6.1", "gpt-sol-6.1:latest"]
     static func resolve(stored: String?, advertised: [String]) -> String? {
