@@ -93,6 +93,16 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .board-controls{position:absolute;right:1.5%;bottom:2%;z-index:75;display:flex;gap:8px;align-items:center}
 .debate-banner{padding:4px 8px;border-radius:8px;background:#2b1d05e6;border:1px solid #ffcf6d88;color:#ffdf9a;font-size:10px;letter-spacing:.06em}
 .debate-banner[hidden]{display:none}
+.task-actions{display:flex;gap:6px;align-items:center;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.task-actions select{padding:3px 6px;border-radius:6px;background:#06111c;color:#e6f4ff;border:1px solid #7fd8ff55;font:inherit;font-size:11px}
+.health-card{grid-column:1/-1}
+.health-list{display:grid;gap:6px;margin-top:10px}
+.health-row{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:10px;background:#0a1624aa;border:1px solid #ffffff14}
+.health-row div{display:grid;gap:2px;min-width:0}.health-row small{color:#89a8bd;overflow-wrap:anywhere}
+.health-row .chip{flex:none;min-width:78px;text-align:center}
+.health-row.ok .chip{background:#0f3d2c;color:#7dffc4}.health-row.failed .chip{background:#4a1416;color:#ff9a9a}
+.health-row.off .chip{background:#26303a;color:#a9b6c2}.health-row.configured .chip{background:#3a3110;color:#ffd77a}
+.health-time{color:#6f8799;font-size:11px}
 .debate-topic{width:min(34vw,320px);padding:6px 10px;border-radius:8px;border:1px solid #7fd8ff55;background:#06111ccc;color:#e6f4ff;font:inherit;font-size:12px}
 @keyframes breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-1.1%) scale(1.006,1.012)}}
 @keyframes look{0%,58%,100%{transform:rotate(0)}64%,72%{transform:rotate(-2.2deg) translateX(-1.2%)}78%,86%{transform:rotate(1.8deg) translateX(1%)}92%{transform:rotate(0)}}

@@ -50,8 +50,13 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     var knownLocalModels: [String] = []
     var claudeModel = ClaudeClient.defaultModel
     var claudeConnected = false
-    var claudeTaskID: String?
-    var claudeRequest: URLSessionDataTask?
+    /// Shared board memory: decisions, results and facts Brandon asked Jarvis to keep.
+    /// Jarvis's visible working folder: saved results and board memory live here so Brandon can open them.
+    let workspace = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Jarvis Workspace")
+    lazy var memory = BoardMemory(file: workspace.appendingPathComponent("Memory/board.md"))
+    /// The voice delegation that asked for a task, so its result can be relayed in the same conversation.
+    struct LiveReply { let update: (String) -> Void; weak var voice: CloudVoice? }
+    var liveReplies: [String: LiveReply] = [:]
     var grokModel = GrokClient.defaultModel
     var grokConnected = false
     var cursorModel = ""
@@ -73,6 +78,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: workspace.appendingPathComponent("Results"), withIntermediateDirectories: true)
         publishTasks(TaskLedger.interruptRunning(ledger.load(), at: TaskLedger.timestamp()))
         if let stored = try? String(contentsOf: support.appendingPathComponent("manager-model.txt"), encoding: .utf8) {
             managerModel = OperationsManager.resolve(stored: stored, advertised: [])
@@ -139,7 +145,6 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool { showWorkspace(); return true }
     func applicationWillTerminate(_ notification: Notification) {
         quitting = true
-        claudeRequest?.cancel()
         seatRequests.values.forEach { $0.cancel() }
         debateRequests.forEach { $0.cancel() }
         publishTasks(TaskLedger.interruptRunning(ledger.load(), at: TaskLedger.timestamp()))
@@ -169,6 +174,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             if message.webView === web, !startupScheduled {
                 startupScheduled = true
                 let backend = body["backend"] as? String ?? "live"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8) { self.runHealthCheck(startup: true) }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
                         self.startConversation(backend: backend, history: [], greeting: true)
@@ -199,6 +205,8 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         }
         case "models": localModels()
         case "stopTask": stopAssigned(body["id"] as? String)
+        case "openResult": if let id = body["id"] as? String { openResult(id) }
+        case "assignTask": if let id = body["id"] as? String, let director = body["director"] as? String { assignUnrouted(id, director: director) }
         case "setManagerModel": storeManagerModel(body["model"] as? String ?? "")
         case "configureClaude": configureClaude()
         case "setClaudeModel": storeClaudeModel(body["model"] as? String ?? "")
@@ -211,6 +219,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         case "setCreativeModel": storeCursorModel(body["model"] as? String ?? "")
         case "setCreativeRepo": storeCursorRepo(body["repo"] as? String ?? "")
         case "configureCursor": configureCursor()
+        case "health": runHealthCheck(startup: false)
         case "setProjectsModel": storeProjectsModel(body["model"] as? String ?? "")
         case "debate":
             let result = startDebate(body["topic"] as? String ?? "")
@@ -268,34 +277,89 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         }
         return nodes
     }
+    /// Typed requests. With Astra selected in Settings the request goes straight to deep reasoning; otherwise it is routed.
     func chat(_ prompt: String, history: String, deep: Bool = false) {
-        guard !brain.busy, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         send("state", "thinking")
-        brain.ask(prompt, history: history, deep: deep) { [weak self] text, route, director, error in
-            guard let self = self else { return }
-            if let error = error { self.send("chatError", error); self.send("state", "idle"); return }
-            guard let text = text else { return }
-            if route == "astra" {
-                self.send("notice", "Luna is handing this reasoning task to Astra…")
-                self.chat(text, history: history + "\n\nUser: " + prompt, deep: true)
-            } else if route == "debate", let topic = RouteDecision.debateTopic(for: RouteDecision(route: "debate", text: text, director: nil, task: self.brain.lastSuggestion)) {
-                self.send("reply", ["text": self.startDebate(topic).message, "model": "Jarvis"])
-                self.send("state", "idle")
-            } else if route == "suggest", let suggestion = RouteDecision.suggestion(for: RouteDecision(route: "suggest", text: text, director: director, task: self.brain.lastSuggestion)) {
-                self.suggestTask(suggestion.title, director: suggestion.director)
-                self.send("reply", ["text": text, "model": deep ? "GPT Astra" : "GPT-6 Luna"])
-                self.send("state", "idle")
-            } else if let assignment = RouteDecision.assignment(for: RouteDecision(route: route ?? "reply", text: text, director: director)) {
-                self.delegateWork(assignment.text, director: assignment.director)
-            } else {
-                self.send("reply", ["text": text, "model": deep ? "GPT Astra" : "GPT-6 Luna"])
-                self.send("state", "idle")
+        if deep { deepReason(prompt, history: history, liveUpdate: nil); return }
+        routeRequest(prompt, history: history) { [weak self] decision in
+            self?.act(on: decision, prompt: prompt, history: history, liveUpdate: nil)
+        }
+    }
+    /// Routing: the fast Claude router first, Luna second. Nil only when neither answered.
+    func routeRequest(_ prompt: String, history: String, completion: @escaping (RouteDecision?) -> Void) {
+        let luna = { [weak self] in
+            guard let self = self, !self.brain.busy, AgentRuntime.executable != nil else { completion(nil); return }
+            self.send("notice", "Luna is routing this request…")
+            self.brain.ask(prompt, history: history, deep: false) { [weak self] text, route, director, error in
+                guard let self = self, error == nil, let text else { completion(nil); return }
+                completion(RouteDecision(route: route ?? "reply", text: text, director: director, task: self.brain.lastSuggestion))
             }
         }
+        guard claudeConnected, let apiKey = ClaudeCredential.read() else { luna(); return }
+        JarvisRouter.route(prompt, history: history, apiKey: apiKey, persona: Personas.text("jarvis") ?? "", memory: memory.recent()) { decision in
+            if let decision { completion(decision) } else { luna() }
+        }
+    }
+    /// Carries out a routing decision. What Jarvis says goes back through the voice delegation, or as a typed reply.
+    func act(on decision: RouteDecision?, prompt: String, history: String, liveUpdate: ((String) -> Void)?) {
+        guard let decision else { acknowledge(recordUnrouted(prompt), liveUpdate); return }
+        if decision.route == "astra" { deepReason(decision.text, history: history + "\n\nUser: " + prompt, liveUpdate: liveUpdate); return }
+        if let topic = RouteDecision.debateTopic(for: decision) { acknowledge(startDebate(topic, liveUpdate: liveUpdate).message, liveUpdate); return }
+        if let fact = RouteDecision.memory(for: decision) {
+            memory.append(kind: "Brandon", text: fact)
+            acknowledge("Noted. I'll keep that in the board's memory: " + fact, liveUpdate)
+            return
+        }
+        if let suggestion = RouteDecision.suggestion(for: decision) {
+            suggestTask(suggestion.title, director: suggestion.director)
+            acknowledge(decision.text + (liveUpdate == nil ? "" : " (This is only a suggestion. Nothing has been added to the task list unless the user approves.)"), liveUpdate)
+            return
+        }
+        if let assignment = RouteDecision.assignment(for: decision) { delegateWork(assignment.text, director: assignment.director, liveUpdate: liveUpdate); return }
+        acknowledge(decision.text, liveUpdate)
+    }
+    /// Substantial reasoning goes to Astra through the agent runtime.
+    func deepReason(_ prompt: String, history: String, liveUpdate: ((String) -> Void)?) {
+        guard !brain.busy, AgentRuntime.executable != nil else { acknowledge("Astra is busy with another request, so I haven't started that one. Ask me again in a moment.", liveUpdate); return }
+        send("notice", "Astra is reasoning in the background…")
+        brain.ask(prompt, history: history, deep: true) { [weak self] text, _, _, error in
+            guard let self = self else { return }
+            if let text, error == nil, !text.isEmpty {
+                if let update = liveUpdate { update(text) } else { self.send("reply", ["text": text, "model": "GPT Astra"]); self.send("state", "idle") }
+            } else { self.acknowledge("Astra could not finish that reasoning request. Nothing was changed.", liveUpdate) }
+        }
+    }
+    var resultsDirectory: URL { workspace.appendingPathComponent("Results") }
+    /// Result documents are named "<date> <title> <first 8 of the task id>.md" so they read well in Finder and can be found by task.
+    func resultFile(_ id: String) -> URL? {
+        guard UUID(uuidString: id) != nil else { return nil }
+        let tag = " " + id.prefix(8).lowercased() + ".md"
+        guard let name = (try? FileManager.default.contentsOfDirectory(atPath: resultsDirectory.path))?.first(where: { $0.hasSuffix(tag) }) else { return nil }
+        return resultsDirectory.appendingPathComponent(name)
     }
     func publishTasks(_ records: [TaskRecord], save: Bool = true) {
         if save { try? ledger.save(records) }
-        send("taskUpdate", records.map { $0.payload })
+        let saved = Set((try? FileManager.default.contentsOfDirectory(atPath: resultsDirectory.path))?.filter { $0.hasSuffix(".md") }.map { String($0.dropLast(3).suffix(8)) } ?? [])
+        send("taskUpdate", records.map { record -> [String: Any] in
+            var item = record.payload
+            if saved.contains(String(record.id.prefix(8)).lowercased()) { item["hasResult"] = true }
+            if TaskLedger.isQueued(record) { item["queued"] = true }
+            return item
+        })
+    }
+    /// The full result as a document Brandon can open. The ledger keeps only a summary.
+    func saveResult(_ id: String, title: String, director: String, text: String) {
+        guard UUID(uuidString: id) != nil else { return }
+        try? FileManager.default.createDirectory(at: resultsDirectory, withIntermediateDirectories: true)
+        let slug = title.replacingOccurrences(of: "[^A-Za-z0-9 ]+", with: " ", options: .regularExpression).split(separator: " ").prefix(8).joined(separator: " ")
+        let name = "\(TaskLedger.timestamp().prefix(10)) \(slug.prefix(60)) \(id.prefix(8).lowercased()).md"
+        let document = "# \(title)\n\n\(director) · \(TaskLedger.timestamp())\n\n---\n\n\(text)\n"
+        try? document.write(to: resultsDirectory.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+    func openResult(_ id: String) {
+        guard let file = resultFile(id), FileManager.default.fileExists(atPath: file.path) else { send("notice", "There is no saved result for that task."); return }
+        NSWorkspace.shared.open(file)
     }
     func updateTask(_ id: String, state: String, summary: String) {
         var records = ledger.load()
@@ -322,104 +386,132 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         default: return "Director of Operations"
         }
     }
-    func delegateWork(_ task: String, director: String, liveUpdate: ((String) -> Void)? = nil) {
-        if director == "operations", tasks["work"] != nil {
-            let message = "There is already a task running. Let’s let that finish before changing the same workspace."
-            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
-            return
-        }
-        let now = TaskLedger.timestamp()
-        let parentID = UUID().uuidString
-        var records = ledger.load()
-        records.insert(TaskRecord(id: parentID, state: "proposed", verified: false, owner: director, parentID: nil, createdAt: now, updatedAt: now, resultSummary: "", title: String(task.prefix(500))), at: 0)
-        if director == "technology" {
-            assignClaude(task, parentID: parentID, records: &records, liveUpdate: liveUpdate)
-            return
-        }
-        if director == "research" {
-            assignGrok(task, parentID: parentID, records: &records, liveUpdate: liveUpdate)
-            return
-        }
-        if director == "creative" {
-            assignCreative(task, parentID: parentID, records: &records, liveUpdate: liveUpdate)
-            return
-        }
-        if director == "projects" {
-            assignProjects(task, parentID: parentID, records: &records, liveUpdate: liveUpdate)
-            return
-        }
-        if director != "operations" {
-            records[0].resultSummary = "waiting: seat not connected"
-            publishTasks(records)
-            let message = "I've added that to the task list for the \(directorTitle(director)). That seat isn't connected yet, so it's waiting and nothing has started."
-            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
-            return
-        }
-        guard AgentRuntime.executable != nil else {
-            records[0].state = "failed"
-            records[0].resultSummary = "Configure JARVIS_AGENT_RUNTIME and rebuild to enable source workers."
-            publishTasks(records)
-            let message = records[0].resultSummary
-            if let update = liveUpdate { update(message) } else { send("chatError", message) }
-            send("state", "idle")
-            return
-        }
-        records[0].state = "running"
-        let manager = OperationsManager.resolve(stored: managerModel, advertised: knownLocalModels)
-        records.insert(TaskRecord(id: UUID().uuidString, state: manager == nil ? "failed" : "proposed", verified: false, owner: "operations-manager", parentID: parentID, createdAt: now, updatedAt: now, resultSummary: manager ?? "manager model not configured", title: "Operations manager"), at: 1)
-        let roster = knownLocalModels.prefix(4)
-        if roster.isEmpty {
-            records.insert(TaskRecord(id: UUID().uuidString, state: "proposed", verified: false, owner: "operations-workers", parentID: parentID, createdAt: now, updatedAt: now, resultSummary: "No local models reported", title: "Local worker roster"), at: 2)
-        } else {
-            for (offset, name) in roster.enumerated() {
-                records.insert(TaskRecord(id: UUID().uuidString, state: "proposed", verified: false, owner: "operations-workers", parentID: parentID, createdAt: now, updatedAt: now, resultSummary: "available", title: name), at: 2 + offset)
-            }
-        }
-        publishTasks(records)
-        let message = "I've added that to the task list and assigned it to the Director of Operations. I'll keep talking and report what comes back."
-        if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]) }
-        startWorker(task, parentID: parentID, liveUpdate: liveUpdate)
-    }
-    func assignClaude(_ task: String, parentID: String, records: inout [TaskRecord], liveUpdate: ((String) -> Void)?) {
-        guard claudeConnected, let apiKey = ClaudeCredential.read() else {
-            records[0].resultSummary = "waiting: seat not connected"
-            publishTasks(records)
-            let message = "I've added that to the task list for the Chief Technology Officer. That seat isn't connected yet, so it's waiting and nothing has started."
-            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
-            return
-        }
-        guard claudeRequest == nil else {
-            records[0].state = "failed"
-            records[0].resultSummary = "A Claude review is already running."
-            publishTasks(records)
-            let message = records[0].resultSummary
-            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
-            return
-        }
-        let now = TaskLedger.timestamp()
-        let taskID = UUID().uuidString
-        claudeTaskID = taskID
-        records[0].state = "running"
-        records.insert(TaskRecord(id: taskID, state: "running", verified: false, owner: claudeModel, parentID: parentID, createdAt: now, updatedAt: now, resultSummary: "", title: String(task.prefix(500))), at: 1)
-        publishTasks(records)
-        let message = "I've added that to the task list and assigned it to the Chief Technology Officer. I'll keep talking and report the review."
+    // MARK: Task core. Every request is recorded first, queued per director, and started when that seat is free.
+    func acknowledge(_ message: String, _ liveUpdate: ((String) -> Void)?) {
         if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
-        let system = Personas.system("cto", fallback: ClaudeClient.ctoFallback) + "\n\nThis call is an assignment from Jarvis. You cannot edit files or run commands from it. Answer as the CTO."
-        claudeRequest = ClaudeClient.review(task, model: claudeModel, apiKey: apiKey, system: system) { [weak self] text in
+    }
+    /// Tells Brandon something through whatever is live: the voice delegation that asked, the live voice session, or page speech.
+    func say(_ line: String, for parentID: String? = nil) {
+        if let id = parentID, let reply = liveReplies[id], let live = liveVoice, live === reply.voice { reply.update(line); return }
+        if let live = liveVoice { live.announce(line); return }
+        send("announce", ["text": line])
+    }
+    func seatReady(_ director: String) -> (connected: Bool, busy: Bool) {
+        switch director {
+        case "technology": return (claudeConnected, seatRuns[director] != nil)
+        case "research": return (grokConnected, seatRuns[director] != nil)
+        case "creative": return (cursorConnected, seatRuns[director] != nil)
+        case "projects": return (projectsModel != nil, seatRuns[director] != nil)
+        case "operations": return (AgentRuntime.executable != nil, tasks["work"] != nil)
+        default: return (false, false)
+        }
+    }
+    /// Records the task, then starts it if its director is free. Otherwise it waits in that director's queue and starts on its own.
+    func delegateWork(_ task: String, director: String, liveUpdate: ((String) -> Void)? = nil) {
+        let now = TaskLedger.timestamp(), parentID = UUID().uuidString, title = directorTitle(director)
+        var records = ledger.load()
+        records.insert(TaskRecord(id: parentID, state: "proposed", verified: false, owner: director, parentID: nil, createdAt: now, updatedAt: now, resultSummary: TaskLedger.queued, title: String(task.prefix(500))), at: 0)
+        publishTasks(records)
+        if let liveUpdate { liveReplies[parentID] = LiveReply(update: liveUpdate, voice: liveVoice) }
+        dispatch(director)
+        records = ledger.load()
+        guard let index = records.firstIndex(where: { $0.id == parentID }) else { return }
+        let message: String
+        if records[index].state == "running" || records[index].state == "completed" {
+            message = "I've added that to the task list and assigned it to the \(title). I'll report what comes back."
+        } else if records[index].state == "failed" {
+            message = "I've added that to the task list, but the \(title) could not start it. \(records[index].resultSummary)"
+        } else if !seatReady(director).connected {
+            records[index].resultSummary = TaskLedger.queued + ": seat not connected"
+            publishTasks(records)
+            message = "I've added that to the task list for the \(title). That seat isn't connected yet, so it will start as soon as it is."
+        } else {
+            let ahead = TaskLedger.queuedAhead(records, of: parentID)
+            records[index].resultSummary = TaskLedger.queued + ": behind the current assignment"
+            publishTasks(records)
+            message = "I've added that to the task list for the \(title). It's queued behind " + (ahead == 0 ? "the current assignment" : "\(ahead + 1) other assignments") + " and will start automatically."
+        }
+        acknowledge(message, liveUpdate)
+    }
+    func dispatch(_ director: String) {
+        let ready = seatReady(director)
+        guard ready.connected, !ready.busy, !quitting, let next = TaskLedger.nextQueued(ledger.load(), director: director) else { return }
+        switch director {
+        case "technology": startClaude(next)
+        case "research": startGrok(next)
+        case "creative": startCreative(next)
+        case "projects": startProjects(next)
+        default: startOperations(next)
+        }
+    }
+    func dispatchAll() { RouteDecision.directors.forEach { dispatch($0) } }
+    /// Shared bookkeeping for a model-backed seat: marks the parent running, adds the director's row, and finishes through `finishAssignment`.
+    func runSeat(_ seat: String, parent: TaskRecord, owner: String, start: (String, @escaping (String?, String?) -> Void) -> URLSessionDataTask?) {
+        let now = TaskLedger.timestamp(), taskID = UUID().uuidString
+        var records = ledger.load()
+        guard let index = records.firstIndex(where: { $0.id == parent.id }) else { return }
+        seatRuns[seat] = taskID
+        records[index].state = "running"; records[index].updatedAt = now; records[index].resultSummary = ""
+        records.insert(TaskRecord(id: taskID, state: "running", verified: false, owner: owner, parentID: parent.id, createdAt: now, updatedAt: now, resultSummary: "", title: parent.title), at: index + 1)
+        publishTasks(records)
+        let request = start(taskID) { [weak self] text, failure in
             guard let self = self else { return }
-            self.claudeRequest = nil
-            if self.quitting { return }
-            if self.ledger.load().first(where: { $0.id == taskID })?.state == "cancelled" { return }
-            if let text {
-                self.updateTask(taskID, state: "completed", summary: String(text.prefix(2000)))
-                self.send("taskResult", ["text": text, "success": true])
-                liveUpdate?("The Chief Technology Officer finished the review. " + String(text.prefix(4000)))
-            } else {
-                self.updateTask(taskID, state: "failed", summary: "Claude did not return a review.")
-                self.send("taskResult", ["text": "Claude did not return a review.", "success": false])
-                liveUpdate?("The Chief Technology Officer did not return a review.")
+            self.seatRequests[seat] = nil
+            if self.quitting || self.seatRuns[seat] != taskID { return }
+            self.seatRuns[seat] = nil
+            if self.ledger.load().first(where: { $0.id == taskID })?.state == "cancelled" { self.dispatch(seat); return }
+            self.finishAssignment(seat: seat, taskID: taskID, parent: parent, text: text, failure: failure)
+        }
+        if let request { seatRequests[seat] = request }
+    }
+    /// Closes the loop: saves the full result, records it in memory, tells Brandon in a sentence with an optional next step, and starts the next queued task.
+    func finishAssignment(seat: String, taskID: String, parent: TaskRecord, text: String?, failure: String?) {
+        let title = directorTitle(seat), name = TaskLedger.headline(parent.title, limit: 90)
+        if let text {
+            saveResult(parent.id, title: parent.title, director: title, text: text)
+            updateTask(taskID, state: "completed", summary: String(text.prefix(2000)))
+            send("taskResult", ["text": text, "success": true])
+            memory.append(kind: title, text: name + " → " + TaskLedger.headline(text))
+            let line = "The \(title) finished: \(name) " + TaskLedger.headline(text) + " The full result is on the task list."
+            offerNextStep(task: parent.title, seat: seat, result: text) { [weak self] offer in
+                self?.say(line + (offer.map { " " + $0 } ?? ""), for: parent.id)
+                self?.liveReplies[parent.id] = nil
             }
-            self.claudeTaskID = nil
+        } else {
+            let summary = failure ?? "The \(title) did not return a result."
+            updateTask(taskID, state: "failed", summary: summary)
+            send("taskResult", ["text": summary, "success": false])
+            say("The \(title) could not finish: \(name) " + TaskLedger.headline(summary), for: parent.id)
+            liveReplies[parent.id] = nil
+        }
+        dispatch(seat)
+    }
+    /// One optional follow-up for approval, from the fast router. Never added to the task list without Brandon's yes.
+    func offerNextStep(task: String, seat: String, result: String, completion: @escaping (String?) -> Void) {
+        guard claudeConnected, let apiKey = ClaudeCredential.read() else { completion(nil); return }
+        JarvisRouter.route(JarvisRouter.nextStepPrompt(task: task, director: seat, result: result), history: "", apiKey: apiKey, persona: "", memory: "") { [weak self] decision in
+            guard let self = self, let decision, let suggestion = RouteDecision.suggestion(for: decision) else { completion(nil); return }
+            self.suggestTask(suggestion.title, director: suggestion.director)
+            completion(decision.text)
+        }
+    }
+    /// The CTO reads the Jarvis Workspace folder and the Jarvis source with read-only tools. The folder mapped in Knowledge map is never sent to a model.
+    func startClaude(_ parent: TaskRecord) {
+        guard let apiKey = ClaudeCredential.read() else { return }
+        let model = claudeModel, workspace = WorkspaceTools(roots: ["workspace": workspace, "source": project]), memoryContext = memory.context()
+        runSeat("technology", parent: parent, owner: model) { [weak self] taskID, done in
+            let system = Personas.system("cto", fallback: ClaudeClient.ctoFallback) + "\n\nThis call is an assignment from Jarvis. You have read-only tools (list_files, read_file, search_code) over two areas: workspace/ is Brandon's Jarvis Workspace folder with saved results and memory, and source/ is the Jarvis app source. Check the real files before you answer questions about them. You cannot edit files or run commands. Answer as the CTO and say what you did not check." + memoryContext
+            ClaudeClient.converse(parent.title, model: model, apiKey: apiKey, system: system, tools: WorkspaceTools.definitions, isCancelled: { [weak self] in self?.seatRuns["technology"] != taskID }, tool: { name, input, reply in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let output = workspace.run(name, input)
+                    DispatchQueue.main.async {
+                        let target = (input["path"] as? String) ?? (input["query"] as? String) ?? ""
+                        self?.noteTask(taskID, summary: "Reading files · \(name) \(String(target.prefix(60)))")
+                        reply(output)
+                    }
+                }
+            }) { text in done(text, text == nil ? "Claude did not return a result." : nil) }
+            return nil
         }
     }
     func refreshClaude(announce: Bool) {
@@ -444,74 +536,33 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         send("grokStatus", ["connected": grokConnected, "model": grokModel])
         send("creativeStatus", ["connected": cursorConnected, "model": cursorModel, "repo": cursorRepo])
         send("projectsStatus", ["connected": projectsModel != nil, "model": projectsModel ?? ""])
+        // A seat that just connected starts whatever is queued for it.
+        dispatchAll()
     }
-    /// Shared bookkeeping for a model-backed seat assignment. `start` returns false when the seat cannot run.
-    func runSeat(_ seat: String, task: String, parentID: String, records: inout [TaskRecord], owner: String, connected: Bool, liveUpdate: ((String) -> Void)?, start: (String, @escaping (String?, String?) -> Void) -> URLSessionDataTask?) {
-        let title = directorTitle(seat)
-        guard connected else {
-            records[0].resultSummary = "waiting: seat not connected"
-            publishTasks(records)
-            let message = "I've added that to the task list for the \(title). That seat isn't connected yet, so it's waiting and nothing has started."
-            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
-            return
-        }
-        guard seatRuns[seat] == nil else {
-            records[0].state = "failed"
-            records[0].resultSummary = "The \(title) is already working on an assignment."
-            publishTasks(records)
-            let message = records[0].resultSummary
-            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
-            return
-        }
-        let now = TaskLedger.timestamp()
-        let taskID = UUID().uuidString
-        seatRuns[seat] = taskID
-        records[0].state = "running"
-        records.insert(TaskRecord(id: taskID, state: "running", verified: false, owner: owner, parentID: parentID, createdAt: now, updatedAt: now, resultSummary: "", title: String(task.prefix(500))), at: 1)
-        publishTasks(records)
-        let message = "I've added that to the task list and assigned it to the \(title). I'll keep talking and report what comes back."
-        if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
-        let request = start(taskID) { [weak self] text, failure in
-            guard let self = self else { return }
-            self.seatRequests[seat] = nil
-            if self.quitting || self.seatRuns[seat] != taskID { return }
-            self.seatRuns[seat] = nil
-            if self.ledger.load().first(where: { $0.id == taskID })?.state == "cancelled" { return }
-            if let text {
-                self.updateTask(taskID, state: "completed", summary: String(text.prefix(2000)))
-                self.send("taskResult", ["text": text, "success": true])
-                liveUpdate?("The \(title) reported back. " + String(text.prefix(4000)))
-            } else {
-                let summary = failure ?? "The \(title) did not return a result."
-                self.updateTask(taskID, state: "failed", summary: summary)
-                self.send("taskResult", ["text": summary, "success": false])
-                liveUpdate?(summary)
-            }
-        }
-        if let request { seatRequests[seat] = request }
-    }
-    func assignGrok(_ task: String, parentID: String, records: inout [TaskRecord], liveUpdate: ((String) -> Void)?) {
-        let apiKey = grokConnected ? GrokCredential.read() : nil
-        let model = grokModel
-        runSeat("research", task: task, parentID: parentID, records: &records, owner: model, connected: apiKey != nil, liveUpdate: liveUpdate) { _, done in
-            let system = Personas.system("research", fallback: GrokClient.researchFallback) + "\n\nThis call is an assignment from Jarvis. Live web or X search is not enabled on this call, so say when your information may be out of date."
-            return GrokClient.research(task, model: model, apiKey: apiKey ?? "", system: system) { done($0, nil) }
+    /// Research runs with live web search when xAI allows it, and says so when it could not search.
+    func startGrok(_ parent: TaskRecord) {
+        guard let apiKey = GrokCredential.read() else { return }
+        let model = grokModel, memoryContext = memory.context()
+        runSeat("research", parent: parent, owner: model) { [weak self] taskID, done in
+            let system = Personas.system("research", fallback: GrokClient.researchFallback) + "\n\nThis call is an assignment from Jarvis. Use live web search for anything current, cite your sources, and separate facts from estimates." + memoryContext
+            GrokClient.researchLive(parent.title, model: model, apiKey: apiKey, system: system, isCancelled: { [weak self] in self?.seatRuns["research"] != taskID }) { text, _ in done(text, nil) }
+            return nil
         }
     }
     /// Creative work runs as a Cursor cloud agent on the configured repository. The ledger keeps the agent link.
-    func assignCreative(_ task: String, parentID: String, records: inout [TaskRecord], liveUpdate: ((String) -> Void)?) {
-        let apiKey = cursorConnected ? CursorCredential.read() : nil
-        let repo = cursorRepo, model = cursorModel
+    func startCreative(_ parent: TaskRecord) {
+        guard let apiKey = CursorCredential.read() else { return }
+        let repo = cursorRepo, model = cursorModel, task = parent.title
         let prompt = CursorClient.prompt(persona: Personas.system("creative", fallback: "You are Jarvis's Creative Director. Own the look, feel, naming and copy. Do not invent results."), brief: task)
-        runSeat("creative", task: task, parentID: parentID, records: &records, owner: "cursor-agent", connected: apiKey != nil, liveUpdate: liveUpdate) { [weak self] taskID, done in
-            CursorClient.launch(prompt: prompt, repo: repo, model: model, name: "Creative: " + String(task.prefix(80)), apiKey: apiKey ?? "") { ids, code in
+        runSeat("creative", parent: parent, owner: "cursor-agent") { [weak self] taskID, done in
+            CursorClient.launch(prompt: prompt, repo: repo, model: model, name: "Creative: " + String(task.prefix(80)), apiKey: apiKey) { ids, code in
                 guard let self = self, self.seatRuns["creative"] == taskID else { return }
                 guard let ids else { done(nil, "Cursor did not launch the agent (HTTP \(code)).") ; return }
                 self.cursorRun = ids
                 let link = CursorClient.agentLink(ids.agent)
                 self.noteTask(taskID, summary: "Cursor agent \(ids.agent) · \(link) · launched on \(repo)")
                 self.send("notice", "The Creative Director's Cursor agent launched: \(link)")
-                self.pollCursor(taskID: taskID, ids: ids, apiKey: apiKey ?? "", link: link, started: Date(), done: done)
+                self.pollCursor(taskID: taskID, ids: ids, apiKey: apiKey, link: link, started: Date(), done: done)
             }
             return nil
         }
@@ -616,13 +667,40 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         send("notice", "Creative Director repository set to \(repo).")
     }
     /// Projects work runs on the local model. It cannot browse, edit files or run commands.
-    func assignProjects(_ task: String, parentID: String, records: inout [TaskRecord], liveUpdate: ((String) -> Void)?) {
-        let model = projectsModel
-        runSeat("projects", task: task, parentID: parentID, records: &records, owner: "projects · " + (model ?? "ollama"), connected: model != nil, liveUpdate: liveUpdate) { _, done in
-            let system = Personas.system("projects", fallback: OllamaClient.projectsFallback) + "\n\nThis call is an assignment from Jarvis. You run on a local model on this Mac and cannot browse, edit files or run commands. Answer as the Director of Projects."
-            return OllamaClient.chat(task, model: model ?? "", system: system) { text in
-                done(text, text == nil ? "The local model \(model ?? "") did not answer. Check that Ollama is running and the model is installed." : nil)
+    func startProjects(_ parent: TaskRecord) {
+        guard let model = projectsModel else { return }
+        let memoryContext = memory.context()
+        runSeat("projects", parent: parent, owner: "projects · " + model) { _, done in
+            let system = Personas.system("projects", fallback: OllamaClient.projectsFallback) + "\n\nThis call is an assignment from Jarvis. You run on a local model on this Mac and cannot browse, edit files or run commands. Answer as the Director of Projects." + memoryContext
+            return OllamaClient.chat(parent.title, model: model, system: system) { text in
+                done(text, text == nil ? "The local model \(model) did not answer. Check that Ollama is running and the model is installed." : nil)
             }
+        }
+    }
+    var healthRunning = false
+    /// Live check of every connection. Seat status follows the result, so a seat shows connected only after a real answer.
+    /// At launch the check skips the Luna call (it would hold up the first request) and Jarvis says what is off.
+    func runHealthCheck(startup: Bool) {
+        guard !healthRunning else { return }
+        healthRunning = true
+        send("healthStarted", true)
+        let settings = HealthCheck.Settings(claudeModel: claudeModel, grokModel: grokModel, projectsModel: projectsModel, managerModel: OperationsManager.resolve(stored: managerModel, advertised: knownLocalModels), cursorRepo: cursorRepo)
+        HealthCheck.run(settings: settings, brain: brain, includeLuna: !startup) { [weak self] results in
+            guard let self = self else { return }
+            self.healthRunning = false
+            for result in results where result.status != "off" {
+                switch result.id {
+                case "claude": self.claudeConnected = result.status == "ok"; self.send("claudeStatus", ["connected": self.claudeConnected, "model": self.claudeModel])
+                case "grok": self.grokConnected = result.status == "ok"
+                case "cursor": self.cursorConnected = result.status == "ok"
+                default: break
+                }
+            }
+            self.sendSeatStatus()
+            self.send("health", ["checkedAt": TaskLedger.timestamp(), "results": results.map { $0.payload }])
+            let failed = results.filter { $0.status == "failed" }.map { $0.name }
+            self.send("notice", failed.isEmpty ? "Health check finished: nothing failed." : "Health check: " + failed.joined(separator: ", ") + " failed. Details are in Settings.")
+            if startup, let line = HealthCheck.startupLine(results) { self.say(line) }
         }
     }
     func storeProjectsModel(_ raw: String) {
@@ -693,7 +771,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         var replies = [String?](repeating: nil, count: speakers.count)
         var pending = speakers.count
         for (index, speaker) in speakers.enumerated() {
-            let system = BoardDebate.turnSystem(persona: Personas.system(speaker.seat, fallback: "You are Jarvis's " + BoardDebate.title(speaker.seat) + "."))
+            let system = BoardDebate.turnSystem(persona: Personas.system(speaker.seat, fallback: "You are Jarvis's " + BoardDebate.title(speaker.seat) + ".")) + memory.context()
             let prompt = BoardDebate.turnPrompt(topic: topic, round: round, seat: speaker.seat, turns: turns)
             debateRequests.append(speaker.ask(prompt, system) { [weak self] text in
                 guard let self = self, self.debateTaskID == taskID else { return }
@@ -721,6 +799,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
                 let summary = BoardDebate.summary(topic: topic, turns: turns, verdict: verdict, rounds: round, chair: chair.model)
                 self.updateTask(taskID, state: "completed", summary: String(summary.prefix(4000)))
                 let line = BoardDebate.announcement(verdict: verdict, rounds: round)
+                self.memory.append(kind: "Board debate", text: topic + " → " + (verdict.map { ($0.agreed ? "agreed: " : "no consensus: ") + $0.decision } ?? "no verdict"))
                 self.send("debateResult", ["id": taskID, "announcement": line, "announce": self.announceDebate(line), "agreed": verdict?.agreed == true, "topic": topic, "decision": verdict?.decision ?? "The chair could not summarise the outcome.", "rounds": round, "chair": chair.model, "transcript": BoardDebate.transcript(turns)])
                 self.endDebate()
             } else {
@@ -773,29 +852,46 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             send("notice", "Stopped the board debate.")
             return
         }
-        for (seat, current) in seatRuns {
-            let parent = ledger.load().first { $0.id == current }?.parentID
-            if id == current || id == parent {
+        let records = ledger.load()
+        // A queued or unassigned task that has not started is simply taken off the list.
+        if let id, let record = records.first(where: { $0.id == id }), record.parentID == nil, record.state == "proposed" {
+            updateTask(id, state: "cancelled", summary: "Removed before it started.")
+            liveReplies[id] = nil
+            send("notice", "Removed that task before it started.")
+            return
+        }
+        if let id {
+            for (seat, current) in seatRuns {
+                let parent = records.first { $0.id == current }?.parentID
+                guard id == current || id == parent else { continue }
                 updateTask(current, state: "cancelled", summary: "Stopped.")
                 seatRuns[seat] = nil
                 seatRequests.removeValue(forKey: seat)?.cancel()
                 if seat == "creative", let run = cursorRun, let apiKey = CursorCredential.read() { CursorClient.cancel(agent: run.agent, run: run.run, apiKey: apiKey); cursorRun = nil }
+                if let parent { liveReplies[parent] = nil }
                 send("notice", "Stopped the \(directorTitle(seat)) assignment.")
-                return
-            }
-        }
-        if let current = claudeTaskID {
-            let parent = ledger.load().first { $0.id == current }?.parentID
-            if id == current || id == parent {
-                updateTask(current, state: "cancelled", summary: "Stopped.")
-                claudeTaskID = nil
-                claudeRequest?.cancel()
-                claudeRequest = nil
-                send("notice", "Stopped the Claude review.")
+                dispatch(seat)
                 return
             }
         }
         stopWorker(id)
+    }
+    /// A request that could not be routed is still on the list. Brandon picks the director; then it runs like any other task.
+    func assignUnrouted(_ id: String, director: String) {
+        var records = ledger.load()
+        guard RouteDecision.directors.contains(director), let index = records.firstIndex(where: { $0.id == id }), records[index].owner == TaskLedger.unassigned, records[index].state == "proposed" else { return }
+        let title = records[index].title
+        records.remove(at: index)
+        publishTasks(records)
+        delegateWork(title, director: director)
+    }
+    /// Never lose a request: when no router answers, the words are recorded as they were said, unassigned.
+    func recordUnrouted(_ prompt: String) -> String {
+        let now = TaskLedger.timestamp()
+        var records = ledger.load()
+        records.insert(TaskRecord(id: UUID().uuidString, state: "proposed", verified: false, owner: TaskLedger.unassigned, parentID: nil, createdAt: now, updatedAt: now, resultSummary: "Routing was unavailable, so this was recorded as you said it. Pick a director to start it.", title: String(prompt.prefix(500))), at: 0)
+        publishTasks(records)
+        return "I couldn't reach my routing models just now, so I've put that on the task list exactly as you said it. It's unassigned until you pick a director."
     }
     func stopWorker(_ id: String? = nil) {
         guard let worker = tasks["work"] else { return }
@@ -807,21 +903,34 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         worker.terminate()
         send("notice", "Stopping the background task. Changes already written remain in the source workspace.")
     }
-    func startWorker(_ task: String, parentID: String? = nil, liveUpdate: ((String) -> Void)? = nil) {
-        guard tasks["work"] == nil else {
-            let message = "There is already a task running. Let’s let that finish before changing the same workspace."
-            if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }; return
+    /// Operations: the manager and local roster are listed, then the workspace worker runs the job.
+    func startOperations(_ parent: TaskRecord) {
+        let now = TaskLedger.timestamp()
+        var records = ledger.load()
+        guard let index = records.firstIndex(where: { $0.id == parent.id }) else { return }
+        records[index].state = "running"; records[index].updatedAt = now; records[index].resultSummary = ""
+        let manager = OperationsManager.resolve(stored: managerModel, advertised: knownLocalModels)
+        var rows = [TaskRecord(id: UUID().uuidString, state: manager == nil ? "failed" : "proposed", verified: false, owner: "operations-manager", parentID: parent.id, createdAt: now, updatedAt: now, resultSummary: manager ?? "manager model not configured", title: "Operations manager")]
+        let roster = knownLocalModels.prefix(4)
+        if roster.isEmpty {
+            rows.append(TaskRecord(id: UUID().uuidString, state: "proposed", verified: false, owner: "operations-workers", parentID: parent.id, createdAt: now, updatedAt: now, resultSummary: "No local models reported", title: "Local worker roster"))
+        } else {
+            for name in roster { rows.append(TaskRecord(id: UUID().uuidString, state: "proposed", verified: false, owner: "operations-workers", parentID: parent.id, createdAt: now, updatedAt: now, resultSummary: "available", title: name)) }
         }
-        guard let runtime = AgentRuntime.executable else {
-            let message = "Configure JARVIS_AGENT_RUNTIME and rebuild to enable source workers."
-            if let update = liveUpdate { update(message) } else { send("chatError", message) }; return
-        }
+        records.insert(contentsOf: rows, at: index + 1)
+        publishTasks(records)
+        startWorker(parent)
+    }
+    func startWorker(_ parent: TaskRecord) {
+        guard tasks["work"] == nil, let runtime = AgentRuntime.executable else { return }
+        let task = parent.title
         let taskID = UUID().uuidString
         workTaskID = taskID
         let worker = OperationsManager.worker(manager: OperationsManager.resolve(stored: managerModel, advertised: knownLocalModels))
         let now = TaskLedger.timestamp()
         var records = ledger.load()
-        records.insert(TaskRecord(id: taskID, state: "running", verified: false, owner: parentID == nil ? "source-worker" : worker.model, parentID: parentID, createdAt: now, updatedAt: now, resultSummary: "", title: String(task.prefix(500))), at: 0)
+        let index = (records.firstIndex { $0.id == parent.id } ?? -1) + 1
+        records.insert(TaskRecord(id: taskID, state: "running", verified: false, owner: worker.model, parentID: parent.id, createdAt: now, updatedAt: now, resultSummary: "", title: String(task.prefix(500))), at: index)
         publishTasks(records)
         let output = support.appendingPathComponent("task-\(UUID().uuidString).txt")
         let instruction = """
@@ -832,7 +941,10 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             defer { try? FileManager.default.removeItem(at: output) }
             if self.quitting { return }
             if self.ledger.load().first(where: { $0.id == taskID })?.state == "cancelled" {
-                self.send("taskResult", ["text": "Stopped.", "success": false]); return
+                self.send("taskResult", ["text": "Stopped.", "success": false])
+                self.liveReplies[parent.id] = nil
+                self.dispatch("operations")
+                return
             }
             let result: String
             if code == 0 { result = (try? String(contentsOf: output, encoding: .utf8)) ?? "The worker exited without a result report." }
@@ -840,18 +952,9 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
                 let errors = log.split(separator: "\n").filter { $0.contains("ERROR:") || $0.contains("not supported") }.suffix(3).joined(separator: "\n")
                 result = "Worker failed (exit \(code)). " + (errors.isEmpty ? "No task completion was confirmed. Please try again or check the model connection." : String(errors.suffix(1000)))
             }
-            self.updateTask(taskID, state: code == 0 ? "completed" : "failed", summary: String(result.prefix(2000)))
-            self.send("taskResult", ["text": result, "success": code == 0])
-            liveUpdate?((code == 0 ? "The source worker completed. " : "The source task needs attention. ") + String(result.prefix(5000)))
+            self.finishAssignment(seat: "operations", taskID: taskID, parent: parent, text: code == 0 ? result : nil, failure: code == 0 ? nil : result)
         }
-        if tasks["work"] != nil {
-            send("taskStarted", ["text": task])
-            if parentID == nil {
-                let message = "I’ve started a worker on Jarvis’s source workspace. I’ll report the result here; we can keep talking in the meantime."
-                if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]) }
-            }
-        }
-        if liveUpdate == nil { send("state", "idle") }
+        if tasks["work"] != nil { send("taskStarted", ["text": task]) }
     }
     func storeManagerModel(_ raw: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -911,10 +1014,11 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
                 if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let message = json["message"] as? [String: Any], let text = message["content"] as? String, !text.isEmpty {
                     guard let result = RouteDecision.decode(text) else {
                         if !retry { self.send("notice", "Retrying the local response with a fresh task context…"); self.localChat(prompt, history: "", model: model, retry: true); return }
-                        self.send("chatError", "The local model could not finish a valid reply. Please try again or select Luna in Settings."); self.send("state", "idle"); return
+                        self.acknowledge(self.recordUnrouted(prompt), nil); return
                     }
                     let route = result.route, answer = result.text
                     if route == "astra" { self.send("notice", "Local Jarvis is handing this reasoning task to Astra…"); self.chat(answer, history: history + "\n\nUser: " + prompt, deep: true); return }
+                    if let fact = RouteDecision.memory(for: result) { self.memory.append(kind: "Brandon", text: fact); self.send("reply", ["text": "Noted. I'll keep that in the board's memory: " + fact, "model": model + " · local"]); self.send("state", "idle"); return }
                     if let topic = RouteDecision.debateTopic(for: result) { self.send("reply", ["text": self.startDebate(topic).message, "model": model + " · local"]); self.send("state", "idle"); return }
                     if let assignment = RouteDecision.assignment(for: result) { self.delegateWork(assignment.text, director: assignment.director); return }
                     if let suggestion = RouteDecision.suggestion(for: result) { self.suggestTask(suggestion.title, director: suggestion.director) }
@@ -1076,26 +1180,14 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
                 guard let self = self, self.liveVoice === live else { return }
                 self.handleVoiceDelegation(prompt, history: context, completion: completion)
             }
+            live.memory = self.memory.context()
             live.start(history: history, greeting: greeting, apiKey: apiKey)
         } }
     }
-    func handleVoiceDelegation(_ prompt: String, history: String, deep: Bool = false, completion: @escaping (String) -> Void) {
-        guard !brain.busy else { completion("Another reasoning request is running. Do not claim this new request has completed."); return }
-        send("notice", deep ? "Astra is reasoning in the background…" : "Luna is handling the delegated request…")
-        brain.ask(prompt, history: history, deep: deep) { [weak self] text, route, director, error in
-            guard let self = self else { return }
-            if error != nil { completion("The backend could not complete that request. No action was confirmed."); return }
-            guard let text = text else { completion("The backend returned no result."); return }
-            if route == "astra" { self.handleVoiceDelegation(text, history: history, deep: true, completion: completion) }
-            else if route == "debate", let topic = RouteDecision.debateTopic(for: RouteDecision(route: "debate", text: text, director: nil, task: self.brain.lastSuggestion)) {
-                completion(self.startDebate(topic, liveUpdate: completion).message)
-            }
-            else if route == "suggest", let suggestion = RouteDecision.suggestion(for: RouteDecision(route: "suggest", text: text, director: director, task: self.brain.lastSuggestion)) {
-                self.suggestTask(suggestion.title, director: suggestion.director)
-                completion(text + " (This is only a suggestion. Nothing has been added to the task list unless the user approves.)")
-            }
-            else if let assignment = RouteDecision.assignment(for: RouteDecision(route: route ?? "reply", text: text, director: director)) { self.delegateWork(assignment.text, director: assignment.director, liveUpdate: completion) }
-            else { completion(text) }
+    /// A hand-off from the realtime voice: route it and act. The reply goes back to the same voice turn.
+    func handleVoiceDelegation(_ prompt: String, history: String, completion: @escaping (String) -> Void) {
+        routeRequest(prompt, history: history) { [weak self] decision in
+            self?.act(on: decision, prompt: prompt, history: history, liveUpdate: completion)
         }
     }
     func configureCloudVoice() {
@@ -1208,6 +1300,43 @@ if CommandLine.arguments.contains("--self-test") {
     assert(nodes.count == 2 && nodes.contains { ($0["label"] as? String) == "hello.swift" })
     try FileManager.default.removeItem(at: temp)
     print("PASS: file enumeration includes root and file, excludes dependency trees")
+} else if CommandLine.arguments.contains("--acceptance") {
+    // Headless: ten realistic requests through the live router. Exit 1 if any lands in the wrong place.
+    guard let apiKey = ClaudeCredential.read() else { print("FAIL  no Anthropic key in Keychain, so the fast router cannot be tested"); exit(1) }
+    Acceptance.run(apiKey: apiKey, persona: Personas.text("jarvis") ?? "") { failed in
+        print(failed == 0 ? "ALL \(Acceptance.cases.count) REQUESTS ROUTED CORRECTLY" : "\(failed) OF \(Acceptance.cases.count) REQUESTS WENT TO THE WRONG PLACE")
+        exit(failed == 0 ? 0 : 1)
+    }
+    dispatchMain()
+} else if CommandLine.arguments.contains("--cto-check") {
+    // Headless: one real CTO question that can only be answered by reading the source with the read-only tools.
+    guard let apiKey = ClaudeCredential.read() else { print("FAIL  no Anthropic key in Keychain"); exit(1) }
+    let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis")
+    let root = URL(fileURLWithPath: Bundle.main.object(forInfoDictionaryKey: "JarvisProjectRoot") as? String ?? FileManager.default.currentDirectoryPath)
+    let tools = WorkspaceTools(roots: ["source": root])
+    var used: [String] = []
+    let system = Personas.system("cto", fallback: ClaudeClient.ctoFallback) + "\n\nYou have read-only tools over source/ (the Jarvis app source). Check the real code before answering."
+    ClaudeClient.converse("In one sentence: what does TaskLedger.nextQueued return, and which file defines it? Read the file first.", model: HealthCheck.Settings.load(support: support).claudeModel, apiKey: apiKey, system: system, tools: WorkspaceTools.definitions, isCancelled: { false }, tool: { name, input, reply in
+        used.append(name + " " + ((input["path"] as? String) ?? (input["query"] as? String) ?? ""))
+        reply(tools.run(name, input))
+    }) { text in
+        used.forEach { print("TOOL  " + $0) }
+        let ok = text != nil && !used.isEmpty && (text ?? "").contains("TaskLedger")
+        print((ok ? "PASS  " : "FAIL  ") + "CTO answered from the code: " + (text.map { String($0.prefix(300)) } ?? "no reply"))
+        exit(ok ? 0 : 1)
+    }
+    dispatchMain()
+} else if CommandLine.arguments.contains("--health") {
+    // Headless: one live call per connection, printed without keys. Exit 1 if anything failed.
+    let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis")
+    let brain = ConversationBrain()
+    HealthCheck.run(settings: .load(support: support), brain: brain) { results in
+        results.forEach { print($0.line) }
+        brain.cancel()
+        exit(results.contains { $0.status == "failed" } ? 1 : 0)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 150) { print("TIMEOUT    health check did not finish in 150 s"); exit(2) }
+    dispatchMain()
 } else {
     let app = NSApplication.shared
     let delegate = JarvisApp(); app.delegate = delegate; app.run()

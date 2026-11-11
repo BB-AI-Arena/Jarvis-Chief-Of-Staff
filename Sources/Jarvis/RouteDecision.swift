@@ -6,7 +6,7 @@ struct RouteDecision {
     /// For route=suggest: the task Jarvis proposes. Nothing is recorded until Brandon approves it.
     var task: String? = nil
     static let directors = ["operations", "technology", "research", "creative", "projects"]
-    static let routes = ["reply", "astra", "task", "assign", "suggest", "debate"]
+    static let routes = ["reply", "astra", "task", "assign", "suggest", "debate", "remember"]
     /// Strict structured-output schema for Luna. The API rejects a schema unless every property is listed in `required`,
     /// so optional fields are required but nullable. (An earlier optional-field schema made every Luna call fail.)
     static var outputSchema: [String: Any] {
@@ -28,11 +28,21 @@ struct RouteDecision {
             guard let task = (result["task"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !task.isEmpty else { return nil }
             return RouteDecision(route: route, text: answer, director: classify(task, hinted: director), task: String(task.prefix(500)))
         }
+        if route == "remember" {
+            let fact = (result["task"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return RouteDecision(route: route, text: answer, director: nil, task: (fact?.isEmpty == false ? fact : answer).map { String($0.prefix(500)) })
+        }
         if route == "debate" {
             let question = (result["task"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             return RouteDecision(route: route, text: answer, director: nil, task: (question?.isEmpty == false ? question : answer).map { String($0.prefix(500)) })
         }
         return RouteDecision(route: route, text: answer, director: director)
+    }
+    /// For route=remember: the fact to keep in board memory.
+    static func memory(for decision: RouteDecision) -> String? {
+        guard decision.route == "remember" else { return nil }
+        let fact = (decision.task ?? decision.text).trimmingCharacters(in: .whitespacesAndNewlines)
+        return fact.isEmpty ? nil : String(fact.prefix(500))
     }
     /// For route=debate: the question to put to the board (the task field, or the text when task is empty).
     static func debateTopic(for decision: RouteDecision) -> String? {
@@ -40,6 +50,9 @@ struct RouteDecision {
         let topic = (decision.task ?? decision.text).trimmingCharacters(in: .whitespacesAndNewlines)
         return topic.isEmpty ? nil : topic
     }
+    static let rememberRule = "Memory: when the user asks you to remember, note or keep in mind a fact, preference or decision, use route=remember with the fact as one plain sentence in task and a short spoken confirmation in text."
+    /// The routing rules shared by every Jarvis brain (Claude router, Luna, local).
+    static let routerRules = "Return JSON with route, text and optional director. You never execute work yourself. Use route=reply for discussion, with your spoken reply in text. Use route=astra only for substantial reasoning or when the user explicitly asks Astra to reason; text must contain the precise reasoning request. Use route=task ONLY when the user explicitly asks for a concrete action on Jarvis's own source (director operations). Use route=assign for any other concrete request; text must contain the complete task. Set director to operations for workspace work or running jobs on this Mac, technology for engineering, research for facts and markets, creative for look, naming and copy, or projects for plans and scope. Merely discussing possible features is not a task. Task list: when the user asks you to do, make, find, fix, build, design, research or plan something concrete, use route=assign with the complete task in text and the best director; the app records it on the task list and tells the user, so do not claim it yourself. In normal conversation you may suggest one useful task: use route=suggest, put a short spoken suggestion that asks for approval in text (for example: Shall I add drafting the launch plan to the task list for Projects?), the task itself in task, and the director. Nothing is added until the user approves. If the user approves a task you suggested earlier, use route=assign with that task. Never say a task was added unless the app confirmed it.  " + debateRule + " " + rememberRule
     /// Shared routing rule for every Jarvis brain: the board debates on request; Jarvis never invents its answer.
     static let debateRule = "Board debate: when the user asks the board or the directors to debate, discuss, argue out or weigh in on a question, use route=debate with the question in task and a short spoken acknowledgement in text. The app runs a live debate and reports the verdict; never invent what the board thinks."
     /// Work is an assignment to a director. Jarvis is not a director and never executes it.

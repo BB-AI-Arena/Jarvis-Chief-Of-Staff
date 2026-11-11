@@ -109,6 +109,8 @@ function playBoardDebate(turns,options={}){
  });
 }
 function stopBoardDebate(){debateToken++;debateQueueGen++;debateQueue=Promise.resolve();clearBoardTalk();$('voiceGrid').classList.remove('debating','agreed');$('agreedRing').hidden=true;$('debateBanner').hidden=true}
+// Health check results: one row per connection with its live status.
+function renderHealth(data){const b=$('runHealth');b.disabled=false;b.textContent='Run health check';const rows=(data&&data.results)||[];$('healthList').innerHTML=rows.map(r=>`<article class="health-row ${escape(r.status)}"><span class="chip ${escape(r.status)}">${escape(r.status)}</span><div><strong>${escape(r.name)}</strong><small>${escape(r.detail)}${r.ms?` · ${Number(r.ms)} ms`:''}</small></div></article>`).join('')+`<p class="health-time">Checked ${escape(String(data.checkedAt||''))}</p>`}
 // Live debates arrive round by round; each round plays after the previous one finishes.
 function queueDebate(turns,options){const gen=debateQueueGen;debateQueue=debateQueue.then(()=>gen===debateQueueGen?playBoardDebate(turns,options):false);return debateQueue}
 function updateDebateControls(){const b=$('conveneDebate');if(b){b.disabled=debateLive;b.textContent=debateLive?'Debating…':'Convene debate'}}
@@ -123,20 +125,38 @@ const demoDebateTurns=[
  {seat:'cto',text:'Fine, if live debates stay behind a flag.'},
  {seat:'jarvis',text:'Then we agree: boardroom now, debates next.'}
 ];
-function ownerLabel(owner){const o=String(owner||'').toLowerCase();if(o==='technology'||o.startsWith('claude'))return 'CTO';if(o==='research'||o.startsWith('grok'))return 'Research';if(o==='creative')return 'Creative';if(o==='projects'||o.startsWith('projects'))return 'Projects';if(o==='board')return 'Board';if(o.startsWith('operations')||o==='source-worker'||o.startsWith('gpt-')||o.includes(':'))return 'Operations';return owner||'unassigned'}
+function ownerLabel(owner){const o=String(owner||'').toLowerCase();if(o==='technology'||o.startsWith('claude'))return 'CTO';if(o==='research'||o.startsWith('grok'))return 'Research';if(o==='creative')return 'Creative';if(o==='projects'||o.startsWith('projects'))return 'Projects';if(o==='board')return 'Board';if(o==='unassigned')return 'Unassigned';if(o.startsWith('operations')||o==='source-worker'||o.startsWith('gpt-')||o.includes(':'))return 'Operations';return owner||'unassigned'}
 // Suggested tasks wait here for Brandon's approval. Nothing reaches the ledger until Approve.
 function suggestionRows(){return suggestions.map((t,i)=>`<article class="task-row suggested"><div><strong>${escape(t.title)}</strong><small><span class="chip">suggested</span>${escape(t.owner||ownerLabel(t.director))} · needs your approval</small></div><span><button type="button" data-approve="${i}">Approve</button> <button type="button" data-dismiss="${i}">Dismiss</button></span></article>`).join('')}
 function wireSuggestions(panel){
  panel.querySelectorAll('button[data-approve]').forEach(b=>b.onclick=()=>{const t=suggestions[Number(b.dataset.approve)];if(!t)return;suggestions.splice(Number(b.dataset.approve),1);native({action:'approveTask',title:t.title,director:t.director});renderTasks(lastTasks)});
  panel.querySelectorAll('button[data-dismiss]').forEach(b=>b.onclick=()=>{suggestions.splice(Number(b.dataset.dismiss),1);renderTasks(lastTasks)});
 }
+// Buttons a task row offers: stop running work, remove a task that has not started, assign an unrouted one, open a saved result.
+const directorNames={operations:'Operations',technology:'CTO',research:'Research',creative:'Creative',projects:'Projects'};
+function taskActions(t){
+ let html='';
+ if(t.state==='running')html+=`<button type="button" data-stop="${escape(t.id)}">Stop</button>`;
+ if(t.state==='proposed'&&!t.parentID){
+  if(t.owner==='unassigned')html+=`<select data-director="${escape(t.id)}" aria-label="Director for this task">${Object.entries(directorNames).map(([id,name])=>`<option value="${id}">${name}</option>`).join('')}</select><button type="button" data-assign="${escape(t.id)}">Assign</button>`;
+  html+=`<button type="button" class="secondary" data-stop="${escape(t.id)}">Remove</button>`;
+ }
+ if(t.hasResult)html+=`<button type="button" class="secondary" data-open="${escape(t.id)}">Open result</button>`;
+ return html?`<span class="task-actions">${html}</span>`:'';
+}
+function wireTaskActions(panel){
+ panel.querySelectorAll('button[data-stop]').forEach(b=>b.onclick=()=>native({action:'stopTask',id:b.dataset.stop}));
+ panel.querySelectorAll('button[data-open]').forEach(b=>b.onclick=()=>native({action:'openResult',id:b.dataset.open}));
+ panel.querySelectorAll('button[data-assign]').forEach(b=>b.onclick=()=>native({action:'assignTask',id:b.dataset.assign,director:panel.querySelector(`select[data-director="${b.dataset.assign}"]`).value}));
+}
+const taskState=t=>t.queued?'queued':t.state;
 function renderBoardTasks(tasks){
  const panel=$('boardTasks');if(!panel)return;
  const active=tasks.filter(t=>t.state==='running'||t.state==='proposed').slice(0,6);
  const recent=tasks.filter(t=>t.state!=='running'&&t.state!=='proposed').slice(0,4);
- const row=t=>`<article class="task-row ${escape(t.state)}"><div><strong>${escape(t.title)}</strong><small><span class="chip ${escape(t.state)}">${escape(t.state)}</span>${escape(ownerLabel(t.owner))}${t.parentID?' · subtask':''}${t.verified?' · ✓ verified':''}</small></div>${t.state==='running'?`<button type="button" data-stop="${escape(t.id)}">Stop</button>`:''}</article>`;
+ const row=t=>`<article class="task-row ${escape(t.state)}"><div><strong>${escape(t.title)}</strong><small><span class="chip ${escape(t.state)}">${escape(taskState(t))}</span>${escape(ownerLabel(t.owner))}${t.parentID?' · subtask':''}${t.verified?' · ✓ verified':''}</small></div>${taskActions(t)}</article>`;
  panel.innerHTML=`<div class="panel-heading"><span>TASK LIST</span><span>${active.length} active</span></div>${suggestionRows()}${active.length||recent.length?active.map(row).join('')+recent.map(row).join(''):(suggestions.length?'':'<p>No tasks yet. Ask Jarvis for something and it lands here.</p>')}`;wireSuggestions(panel);
- panel.querySelectorAll('button[data-stop]').forEach(b=>b.onclick=()=>native({action:'stopTask',id:b.dataset.stop}));
+ wireTaskActions(panel);
 }
 function renderTasks(tasks){
  lastTasks=tasks;renderBoardTasks(tasks);
@@ -145,9 +165,9 @@ function renderTasks(tasks){
  panel.hidden=false;
  const active=tasks.filter(task=>task.state==='running'||task.state==='proposed');
  const recent=tasks.filter(task=>task.state!=='running'&&task.state!=='proposed').slice(0,8);
- const row=task=>`<article class="task-row ${task.state}"><div><strong>${escape(task.title)}</strong><small>${escape(task.owner)} · ${escape(task.state)}${task.parentID?' · subtask':''}${task.verified?' · verified':''}${task.resultSummary?' · '+escape(task.resultSummary):''}</small></div>${task.state==='running'?`<button type="button" data-stop="${escape(task.id)}">Stop</button>`:''}</article>`;
+ const row=task=>`<article class="task-row ${task.state}"><div><strong>${escape(task.title)}</strong><small>${escape(ownerLabel(task.owner))} · ${escape(taskState(task))}${task.parentID?' · subtask':''}${task.verified?' · verified':''}${task.resultSummary?' · '+escape(task.resultSummary):''}</small></div>${taskActions(task)}</article>`;
  panel.innerHTML=`<div class="panel-heading">TASKS</div>${suggestions.length?`<div class="task-group"><h3>Suggested</h3>${suggestionRows()}</div>`:''}<div class="task-group"><h3>Active</h3>${active.length?active.map(row).join(''):'<p>No active tasks.</p>'}</div><div class="task-group"><h3>Recent</h3>${recent.length?recent.map(row).join(''):'<p>No recent tasks.</p>'}</div>`;
- panel.querySelectorAll('button[data-stop]').forEach(button=>button.onclick=()=>native({action:'stopTask',id:button.dataset.stop}));
+ wireTaskActions(panel);
  wireSuggestions(panel);
 }
 function renderProjects(){$('projectGrid').innerHTML='';if(!projects.length){$('projectGrid').innerHTML='<section class="project-card"><p class="eyebrow">A BLANK PAGE IS AN OPPORTUNITY</p><h2>Give your idea a home.</h2><p>Save a project brief here, then work through it with Jarvis. Agent execution will be connected in a later stage.</p></section>';return}projects.forEach(project=>{const card=document.createElement('section');card.className='project-card';card.innerHTML=`<small>PROJECT BRIEF · ${escape(project.date)}</small><h2>${escape(project.title)}</h2><p>${escape(project.brief)}</p><button class="secondary">Discuss with Jarvis ↗</button>`;card.querySelector('button').onclick=()=>{$('projectName').innerHTML='✧ &nbsp; '+escape(project.title);navigate('presence');$('prompt').value='Let’s work on '+project.title+'. Here is the brief:\n'+project.brief;$('prompt').focus()};$('projectGrid').append(card)})}
@@ -161,6 +181,9 @@ window.receive=({event,data})=>{
  case'taskSuggestion':if(data&&data.title&&!suggestions.some(t=>t.title===data.title)){suggestions.unshift({title:String(data.title),director:String(data.director||''),owner:String(data.owner||'')});suggestions=suggestions.slice(0,5);renderTasks(lastTasks)}break;
  case'managerModel':managerModel=data||'';renderVoices();break;
  case'claudeStatus':claudeConnected=!!(data&&data.connected);if(data&&data.model)claudeModel=data.model;renderVoices();break;
+ case'announce':notice(data.text);if(spoken||conversationActive)native({action:'speak',text:data.text,voice:voices.Jarvis,conversation:conversationActive});break;
+ case'healthStarted':$('runHealth').disabled=true;$('runHealth').textContent='Checking…';$('healthList').innerHTML='<p>Calling each service…</p>';break;
+ case'health':renderHealth(data);break;
  case'projectsStatus':projectsModel=data&&data.connected&&data.model?data.model:'';renderVoices();break;
  case'debateStarted':stopBoardDebate();debateLive=true;updateDebateControls();queueDebate([{seat:'jarvis',text:'Board, the question: '+data.topic}],{agreement:false,banner:'LIVE · directors are answering'});notice('Board debate started with '+(data.seats||[]).length+' directors.');break;
  case'debateRound':queueDebate(data.turns||[],{agreement:false,banner:'LIVE · round '+data.round+' · model output'});if((data.silent||[]).length)notice('No answer this round from: '+data.silent.join(', '));break;
@@ -219,6 +242,7 @@ $('configureGrok').onclick=()=>native({action:'configureGrok'});
 $('configureCursor').onclick=()=>native({action:'configureCursor'});
 
 $('stopTask').onclick=()=>native({action:'stopTask'});
+$('runHealth').onclick=()=>native({action:'health'});
 $('conveneDebate').onclick=()=>{const topic=$('debateTopic').value.trim();if(!topic){notice('Give the board a question to debate.');return}native({action:'debate',topic})};
 $('debateTopic').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('conveneDebate').click()}};
 $('demoDebate').onclick=()=>playBoardDebate(demoDebateTurns,{agreement:true,summary:'Demo · boardroom now, debates next',demo:true});

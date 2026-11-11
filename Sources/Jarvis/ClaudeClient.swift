@@ -19,7 +19,7 @@ enum ClaudeClient {
             DispatchQueue.main.async { completion(ok) }
         }.resume()
     }
-    static let ctoFallback = "You are Jarvis's Chief Technology Officer. Answer the engineering request. You cannot edit files from this call. Be concise and do not invent results."
+    static let ctoFallback = "You are Jarvis's Chief Technology Officer. Answer the engineering request. You can read the workspace with your tools but cannot edit files or run commands. Be concise and do not invent results."
     @discardableResult
     static func review(_ prompt: String, model: String, apiKey: String, system: String = ClaudeClient.ctoFallback, completion: @escaping (String?) -> Void) -> URLSessionDataTask {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
@@ -54,17 +54,25 @@ enum ClaudeClient {
             return (id, name, brief)
         }
     }
-    /// Claude with tools. The tool handler runs natively and returns text. At most three tool rounds.
-    static func converse(_ prompt: String, model: String, apiKey: String, system: String, tools: [[String: Any]], isCancelled: @escaping () -> Bool, tool: @escaping (String, String, @escaping (String) -> Void) -> Void, completion: @escaping (String?) -> Void) {
+    /// Tool calls with their full input, as (id, name, input).
+    static func toolUses(_ blocks: [[String: Any]]) -> [(id: String, name: String, input: [String: Any])] {
+        blocks.compactMap { block in
+            guard block["type"] as? String == "tool_use", let id = block["id"] as? String, let name = block["name"] as? String else { return nil }
+            return (id, name, block["input"] as? [String: Any] ?? [:])
+        }
+    }
+    static let maxToolRounds = 8
+    /// Claude with tools. The tool handler runs natively and returns text. After `maxToolRounds` the tools are withdrawn so Claude must answer.
+    static func converse(_ prompt: String, model: String, apiKey: String, system: String, tools: [[String: Any]], isCancelled: @escaping () -> Bool, tool: @escaping (String, [String: Any], @escaping (String) -> Void) -> Void, completion: @escaping (String?) -> Void) {
         var messages: [[String: Any]] = [["role": "user", "content": String(prompt.prefix(12000))]]
         func round(_ remaining: Int) {
             if isCancelled() { return }
             var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
             request.httpMethod = "POST"
-            request.timeoutInterval = 120
+            request.timeoutInterval = 180
             request.setValue("application/json", forHTTPHeaderField: "content-type")
             authorize(&request, apiKey)
-            var body: [String: Any] = ["model": model, "max_tokens": 1500, "system": system, "messages": messages]
+            var body: [String: Any] = ["model": model, "max_tokens": 4000, "system": system, "messages": messages]
             if remaining > 0 { body["tools"] = tools }
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
             URLSession.shared.dataTask(with: request) { data, response, _ in
@@ -73,19 +81,20 @@ enum ClaudeClient {
                 DispatchQueue.main.async {
                     if isCancelled() { return }
                     guard let json, let blocks = json["content"] as? [[String: Any]] else { completion(nil); return }
-                    let calls = toolCalls(blocks)
+                    let calls = toolUses(blocks)
                     if json["stop_reason"] as? String == "tool_use", !calls.isEmpty, remaining > 0 {
                         messages.append(["role": "assistant", "content": blocks])
                         var results: [[String: Any]] = []
                         func next(_ index: Int) {
                             if index == calls.count {
+                                if remaining == 1 { results.append(["type": "text", "text": "That was the last tool call available. Answer now with what you have, and say what you could not check."]) }
                                 messages.append(["role": "user", "content": results])
                                 round(remaining - 1)
                                 return
                             }
                             let call = calls[index]
-                            tool(call.name, call.brief) { output in
-                                results.append(["type": "tool_result", "tool_use_id": call.id, "content": String(output.prefix(20000))])
+                            tool(call.name, call.input) { output in
+                                results.append(["type": "tool_result", "tool_use_id": call.id, "content": String(output.prefix(24000))])
                                 next(index + 1)
                             }
                         }
@@ -97,7 +106,7 @@ enum ClaudeClient {
                 }
             }.resume()
         }
-        round(3)
+        round(maxToolRounds)
     }
     private static func authorize(_ request: inout URLRequest, _ apiKey: String) {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")

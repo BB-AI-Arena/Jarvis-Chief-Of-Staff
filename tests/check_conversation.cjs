@@ -267,6 +267,47 @@ console.log('PASS: active and recent tasks render, and Stop targets the running 
   assert.equal(calls.filter(c => c.action === 'speak').length, 0);
   w.stopBoardDebate();
   console.log('PASS: the page speaks the verdict only when no live voice session is relaying it');
+  calls.length = 0;
+  w.document.getElementById('runHealth').click();
+  assert.equal(calls.at(-1).action, 'health');
+  w.receive({event:'healthStarted', data:true});
+  assert.equal(w.document.getElementById('runHealth').disabled, true);
+  w.receive({event:'health', data:{checkedAt:'2026-11-09T22:00:00Z', results:[
+    {id:'claude', name:'Claude (CTO)', status:'ok', detail:'claude-sonnet-5-5 · replied “OK”', ms:812},
+    {id:'grok', name:'Grok (Research)', status:'failed', detail:'HTTP 404: Model not found', ms:300},
+    {id:'cursor', name:'Cursor (Creative)', status:'off', detail:'no Cursor key in Keychain', ms:0}]}});
+  const health = w.document.getElementById('healthList');
+  assert.equal(w.document.getElementById('runHealth').disabled, false);
+  assert.equal(health.querySelectorAll('.health-row').length, 3);
+  assert.match(health.querySelector('.health-row.ok').textContent, /Claude \(CTO\).*replied “OK”.*812 ms/);
+  assert.match(health.querySelector('.health-row.failed').textContent, /HTTP 404/);
+  assert.match(health.querySelector('.health-row.off').textContent, /no Cursor key/);
+  console.log('PASS: Settings runs the health check and shows each connection as ok, failed or off with its detail');
+  const U1='11111111-1111-4111-8111-111111111111', U2='22222222-2222-4222-8222-222222222222', U3='33333333-3333-4333-8333-333333333333';
+  w.receive({event:'taskUpdate', data:[
+    {id:U1, state:'proposed', verified:false, owner:'unassigned', title:'Find a supplier', createdAt:'', updatedAt:'', resultSummary:'Routing was unavailable'},
+    {id:U2, state:'proposed', verified:false, owner:'research', title:'Survey competitors', createdAt:'', updatedAt:'', resultSummary:'queued: behind the current assignment', queued:true},
+    {id:U3, state:'completed', verified:false, owner:'technology', title:'Review the ledger', createdAt:'', updatedAt:'', resultSummary:'Fine.', hasResult:true}]});
+  const list = w.document.getElementById('boardTasks');
+  assert.match(list.textContent, /Unassigned/);
+  assert.match(list.textContent, /queued/);
+  calls.length = 0;
+  list.querySelector(`select[data-director="${U1}"]`).value = 'research';
+  list.querySelector(`button[data-assign="${U1}"]`).click();
+  assert.equal(calls.at(-1).action, 'assignTask'); assert.equal(calls.at(-1).id, U1); assert.equal(calls.at(-1).director, 'research');
+  list.querySelector(`button[data-stop="${U2}"]`).click();
+  assert.equal(calls.at(-1).action, 'stopTask'); assert.equal(calls.at(-1).id, U2);
+  assert.equal(list.querySelector(`button[data-stop="${U2}"]`).textContent, 'Remove');
+  list.querySelector(`button[data-open="${U3}"]`).click();
+  assert.equal(calls.at(-1).action, 'openResult'); assert.equal(calls.at(-1).id, U3);
+  assert.equal(list.querySelector(`button[data-open="${U2}"]`), null);
+  console.log('PASS: the task list lets you assign an unrouted request, remove a queued one, and open a saved result');
+  calls.length = 0;
+  w.receive({event:'announce', data:{text:'The Chief Technology Officer finished: Review the ledger. It saves atomically.'}});
+  assert.equal(calls.filter(c => c.action === 'speak').length, 1);
+  assert.match(calls.find(c => c.action === 'speak').text, /finished: Review the ledger/);
+  assert.match(w.document.getElementById('notice').textContent, /finished: Review the ledger/);
+  console.log('PASS: Jarvis speaks a finished result on the page when no live voice is relaying it');
   w.receive({event:'projectsStatus', data:{connected:false, model:''}});
   assert.match(w.document.querySelector('.seat.projects').textContent, /not connected/);
   w.receive({event:'projectsStatus', data:{connected:true, model:'gemma4:latest'}});

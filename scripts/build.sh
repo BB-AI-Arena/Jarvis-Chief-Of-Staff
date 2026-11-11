@@ -27,5 +27,14 @@ runtime=os.environ.get('JARVIS_AGENT_RUNTIME') or (runtime_file.read_text().stri
 if runtime: info['JarvisAgentRuntime']=runtime
 with open(Path(app)/'Contents/Info.plist','wb') as f:plistlib.dump(info,f)
 PY
-codesign --force --deep --sign - "$app"
+# Sign with a stable identity when one exists, so macOS remembers "Always Allow" for the Keychain items across rebuilds.
+# An ad-hoc signature (-) changes on every build, which makes macOS ask again for every saved key.
+# Create one in Keychain Access: Certificate Assistant > Create a Certificate > name "Jarvis Dev", Self-Signed Root, Code Signing.
+identity="${JARVIS_SIGN_IDENTITY:-Jarvis Dev}"
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$identity\"" && codesign --force --deep --sign "$identity" "$app" 2>/dev/null; then
+  echo "Signed with \"$identity\"."
+else
+  codesign --force --deep --sign - "$app"
+  echo "Signed ad-hoc: macOS will ask for Keychain access again after this build. Create a \"$identity\" code-signing certificate to stop that."
+fi
 printf '%s\n' "$app"

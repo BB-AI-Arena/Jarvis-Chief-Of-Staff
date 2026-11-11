@@ -29,3 +29,19 @@ assert(interrupted[2].state == "failed" && interrupted[2].parentID == "parent")
 assert(interrupted[1].state == "failed" && interrupted[1].resultSummary == "manager model not configured")
 print("PASS: task ledger round-trips, and a running task relaunch is interrupted")
 print("PASS: director work keeps a parent id, and Jarvis is not the owner")
+func queuedTask(_ id: String, _ owner: String, _ summary: String = TaskLedger.queued, state: String = "proposed", parent: String? = nil) -> TaskRecord {
+    TaskRecord(id: id, state: state, verified: false, owner: owner, parentID: parent, createdAt: "", updatedAt: "", resultSummary: summary, title: id)
+}
+// Stored newest first: c was asked last, a first.
+let queue = [queuedTask("c", "research"), queuedTask("p", "projects"), queuedTask("b", "research", "queued: behind the current assignment"), queuedTask("legacy", "research", "waiting: seat not connected"), queuedTask("child", "research", parent: "b"), queuedTask("run", "research", "", state: "running"), queuedTask("a", "research")]
+assert(TaskLedger.nextQueued(queue, director: "research")?.id == "a")
+assert(TaskLedger.nextQueued(queue, director: "projects")?.id == "p")
+assert(TaskLedger.nextQueued(queue, director: "creative") == nil)
+assert(TaskLedger.isQueued(queue[3]) == false && TaskLedger.isQueued(queue[4]) == false && TaskLedger.isQueued(queue[5]) == false)
+assert(TaskLedger.queuedAhead(queue, of: "c") == 2 && TaskLedger.queuedAhead(queue, of: "a") == 0)
+assert(TaskLedger.nextQueued([queuedTask("u", TaskLedger.unassigned, "Routing was unavailable")], director: "operations") == nil)
+print("PASS: each director's queue starts the oldest queued task; legacy waiting, unassigned, running and child rows never auto-start")
+assert(TaskLedger.headline("## Summary\n**The ledger saves atomically.** It also sorts keys. More detail follows.") == "Summary The ledger saves atomically.")
+assert(TaskLedger.headline("Short") == "Short")
+assert(TaskLedger.headline(String(repeating: "word ", count: 100)).hasSuffix("…") && TaskLedger.headline(String(repeating: "word ", count: 100)).count <= 221)
+print("PASS: a spoken result is one clean sentence without markdown")

@@ -10,3 +10,7 @@ let calls = ClaudeClient.toolCalls([["type": "text", "text": "Let me check."], [
 assert(calls.count == 1 && calls[0].id == "toolu_1" && calls[0].name == "lookup" && calls[0].brief == "Neon boardroom")
 assert(ClaudeClient.toolCalls([["type": "text", "text": "No tools"]]).isEmpty)
 print("PASS: Claude tool_use blocks are parsed into id, name and brief; text-only replies have no tool calls")
+let uses = ClaudeClient.toolUses([["type": "text", "text": "Looking."], ["type": "tool_use", "id": "toolu_2", "name": "read_file", "input": ["path": "source/Package.swift", "start_line": 1]]])
+assert(uses.count == 1 && uses[0].name == "read_file" && uses[0].input["path"] as? String == "source/Package.swift" && uses[0].input["start_line"] as? Int == 1)
+assert(ClaudeClient.maxToolRounds == 8)
+print("PASS: the CTO's tool calls carry their full input, with a bounded number of rounds")
