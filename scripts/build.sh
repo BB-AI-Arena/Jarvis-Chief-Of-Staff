@@ -27,8 +27,19 @@ runtime=os.environ.get('JARVIS_AGENT_RUNTIME') or (runtime_file.read_text().stri
 if runtime: info['JarvisAgentRuntime']=runtime
 with open(Path(app)/'Contents/Info.plist','wb') as f:plistlib.dump(info,f)
 PY
-# Ad-hoc signature. macOS ties Keychain "Always Allow" to the exact build unless the app is signed with an
-# Apple-issued certificate (Team ID), so after each rebuild it asks once per saved key. A self-signed certificate
-# does not change that (tried 2026-11-10). Set JARVIS_SIGN_IDENTITY to an Apple Developer identity to stop the prompts.
+# Ad-hoc signature. macOS ties Keychain "Always Allow" to the exact build unless the app has an Apple Team ID,
+# and a self-signed certificate does not change that (tried 2026-11-10). So the app never reads the Keychain itself:
+# it asks the jarvis-keys helper below, which is rebuilt only when its own source changes.
 codesign --force --deep --sign "${JARVIS_SIGN_IDENTITY:--}" "$app"
+# The Keychain helper is rebuilt only when its source changes: its exact build is what macOS remembers for
+# "Always Allow", so leaving it alone is what stops the Keychain prompts after app rebuilds.
+keys_src="Tools/jarvis-keys/main.swift"
+keys_bin="$HOME/Library/Application Support/Jarvis/bin/jarvis-keys"
+keys_want="$(shasum -a 256 "$keys_src" | cut -d' ' -f1)"
+if [[ ! -x "$keys_bin" || "$(cat "$keys_bin.sha256" 2>/dev/null)" != "$keys_want" ]]; then
+  mkdir -p "${keys_bin:h}"
+  swiftc -O "$keys_src" -o "$keys_bin"
+  print -r -- "$keys_want" > "$keys_bin.sha256"
+  echo "Rebuilt the Keychain helper: macOS will ask once per saved key. Click Always Allow; it will not ask again after app rebuilds."
+fi
 printf '%s\n' "$app"

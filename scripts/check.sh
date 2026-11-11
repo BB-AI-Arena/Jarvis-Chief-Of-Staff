@@ -21,6 +21,8 @@ swiftc Sources/Jarvis/BoardDebate.swift tests/debate/main.swift -o .build/check-
 .build/check-debate
 swiftc Sources/Jarvis/OllamaClient.swift tests/ollama/main.swift -o .build/check-ollama
 .build/check-ollama
+swiftc Tools/jarvis-keys/main.swift -o .build/check-jarvis-keys
+zsh tests/keys/check.sh .build/check-jarvis-keys
 swiftc Sources/Jarvis/JarvisRouter.swift Sources/Jarvis/RouteDecision.swift tests/router/main.swift -o .build/check-router
 .build/check-router
 swiftc Sources/Jarvis/BoardMemory.swift tests/memory/main.swift -o .build/check-memory
@@ -29,7 +31,7 @@ swiftc Sources/Jarvis/WorkspaceTools.swift tests/workspace/main.swift -o .build/
 .build/check-workspace
 swiftc Sources/Jarvis/Acceptance.swift Sources/Jarvis/JarvisRouter.swift Sources/Jarvis/RouteDecision.swift tests/acceptance/main.swift -o .build/check-acceptance
 .build/check-acceptance
-swiftc Sources/Jarvis/HealthCheck.swift Sources/Jarvis/ClaudeClient.swift Sources/Jarvis/GrokClient.swift Sources/Jarvis/OllamaClient.swift Sources/Jarvis/CursorClient.swift Sources/Jarvis/RouteDecision.swift Sources/Jarvis/AgentRuntime.swift Sources/Jarvis/ConversationBrain.swift Sources/Jarvis/Personas.swift Sources/Jarvis/VoiceCredential.swift Sources/Jarvis/ClaudeCredential.swift Sources/Jarvis/GrokCredential.swift Sources/Jarvis/CursorCredential.swift tests/health/main.swift -o .build/check-health
+swiftc Sources/Jarvis/HealthCheck.swift Sources/Jarvis/ClaudeClient.swift Sources/Jarvis/GrokClient.swift Sources/Jarvis/OllamaClient.swift Sources/Jarvis/CursorClient.swift Sources/Jarvis/RouteDecision.swift Sources/Jarvis/AgentRuntime.swift Sources/Jarvis/ConversationBrain.swift Sources/Jarvis/Personas.swift Sources/Jarvis/KeychainBroker.swift Sources/Jarvis/VoiceCredential.swift Sources/Jarvis/ClaudeCredential.swift Sources/Jarvis/GrokCredential.swift Sources/Jarvis/CursorCredential.swift tests/health/main.swift -o .build/check-health
 .build/check-health
 for persona in jarvis cto research operations creative projects board-charter; do test -s "Resources/board/personas/$persona.md" || { echo "FAIL: missing persona $persona"; exit 1; }; grep -q "\"$persona\"" Sources/Jarvis/Personas.swift || { echo "FAIL: persona $persona not loadable"; exit 1; }; done
 echo "PASS: every board persona and the charter are bundled and loadable"
