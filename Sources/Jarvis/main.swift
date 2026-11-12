@@ -832,10 +832,19 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         }
         dark.save(support: support)
         let command = "ssh-copy-id -i '\(dark.publicKey)' \(dark.target)"
-        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(command.replacingOccurrences(of: "\"", with: "\\\""))\"\nend tell"
-        var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
-        send("notice", error == nil ? "Terminal is open: type DARK's password there once. Then run the health check in Settings." : "Open Terminal and run: " + command)
+        // A .command file opens in Terminal through Launch Services, so Jarvis needs no Automation permission to show it.
+        let script = support.appendingPathComponent("connect-dark.command")
+        let body = "#!/bin/zsh\nclear\necho \"Jarvis is adding its SSH key to DARK. Type DARK's password when asked. It is not shown or saved.\"\necho\nif \(command); then echo; echo \"Done. Close this window, go back to Jarvis and run the health check.\"; else echo; echo \"That did not work. Close this window and try Connect DARK again.\"; fi\n"
+        do {
+            try body.write(to: script, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+            let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+            NSWorkspace.shared.open([script], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                DispatchQueue.main.async {
+                    self.send("notice", error == nil ? "Terminal is open: type DARK's password there once. Then run the health check in Settings." : "Open Terminal and run: " + command)
+                }
+            }
+        } catch { send("notice", "Open Terminal and run: " + command) }
     }
     func storeProjectsModel(_ raw: String) {
         let url = support.appendingPathComponent("projects-model.txt")
