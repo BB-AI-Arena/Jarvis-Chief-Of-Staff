@@ -8,5 +8,7 @@ echo "== Routing: ten requests"
 dist/Jarvis.app/Contents/MacOS/Jarvis --acceptance
 echo "== CTO reading the source with its tools"
 dist/Jarvis.app/Contents/MacOS/Jarvis --cto-check
+echo "== Research fallback: Claude with web search"
+dist/Jarvis.app/Contents/MacOS/Jarvis --research-check
 echo "== Connections"
 dist/Jarvis.app/Contents/MacOS/Jarvis --health

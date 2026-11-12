@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const native=payload=>window.webkit?.messageHandlers.jarvis.postMessage(payload);
 const storage={get(k,f){try{return JSON.parse(localStorage.getItem('jarvis.'+k))??f}catch{return f}},set(k,v){localStorage.setItem('jarvis.'+k,JSON.stringify(v))}};
-let streamingVoice=false;let managerModel='';let claudeConnected=false;let claudeModel='claude-sonnet-5-5';let projectsModel='',debateLive=false,debateQueue=Promise.resolve(),debateQueueGen=0;let grokConnected=false,grokModel='grok-4.7',cursorConnected=false,cursorModel='',cursorRepo='https://github.com/BB-AI-Arena/Jarvis-Chief-Of-Staff';
+let streamingVoice=false;let managerModel='';let claudeConnected=false;let claudeModel='claude-sonnet-5-5';let projectsModel='',debateLive=false,debateQueue=Promise.resolve(),debateQueueGen=0;let grokConnected=false,grokModel='grok-4.7',researchFallback='',cursorConnected=false,cursorModel='',cursorRepo='https://github.com/BB-AI-Arena/Jarvis-Chief-Of-Staff';
 let suggestions=[],lastTasks=[];let taskActive=false,mouthCues=[],audioTime=0,audioTimeStamp=0;
 let state='idle',busy=false,spoken=storage.get('spoken',true),motion=storage.get('motion',true),conversationActive=false,audioLevel=0,voiceBackend=storage.get('voiceBackend','live');
 if(!storage.get('lunaFrontV1',false)){storage.set('brain','luna');storage.set('lunaFrontV1',true)}
@@ -35,7 +35,7 @@ const rand=(a,b)=>(a+Math.random()*(b-a)).toFixed(2);
 function boardSeats(){return [
  {key:'Jarvis',seat:'head',id:'jarvis',title:'Chief of Staff',model:'GPT-6 Luna',status:'Chairs the table and does not execute tasks.',connected:true},
  {key:'Claude',seat:'left',id:'cto',title:'Chief Technology Officer',model:claudeConnected?claudeModel:'not connected',status:claudeConnected?'Engineering and review. connected':'Engineering and review. not connected',connected:claudeConnected},
- {key:'Grok',seat:'right',id:'research',title:'Director of Research',model:grokConnected?grokModel:'not connected',status:grokConnected?'Grok research. connected':'Grok research. not connected',connected:grokConnected},
+ {key:'Grok',seat:'right',id:'research',title:'Director of Research',model:grokConnected?grokModel:researchFallback?'Claude · web search':'not connected',status:grokConnected?'Grok research. connected':researchFallback?'Grok not connected; Claude is standing in with web search.':'Grok research. not connected',connected:grokConnected||!!researchFallback},
  {key:'Local',seat:'operations',id:'operations',title:'Director of Operations',model:managerModel?managerModel+' · medium':'GPT Astra',status:managerModel?`Manager ${managerModel}. Hires local models as workers.`:'Hires local models as workers. Manager model not configured.',connected:true},
  {key:'Designer',seat:'creative',id:'creative',title:'Creative Director',label:'Creative Director · Cursor',model:cursorConnected?'Cursor · '+(cursorModel||'default model'):'Cursor · not connected',status:cursorConnected?'Cloud agents on '+cursorRepo.replace(/^https:\/\//,''):'Cloud agents. not connected',connected:cursorConnected},
  {key:'Manager',seat:'projects',id:'projects',title:'Director of Projects',model:projectsModel?'Ollama · '+projectsModel:'not connected',status:projectsModel?'Planning on this Mac. connected':'Planning. Local model not set',connected:!!projectsModel}
@@ -125,7 +125,7 @@ const demoDebateTurns=[
  {seat:'cto',text:'Fine, if live debates stay behind a flag.'},
  {seat:'jarvis',text:'Then we agree: boardroom now, debates next.'}
 ];
-function ownerLabel(owner){const o=String(owner||'').toLowerCase();if(o==='technology'||o.startsWith('claude'))return 'CTO';if(o==='research'||o.startsWith('grok'))return 'Research';if(o==='creative')return 'Creative';if(o==='projects'||o.startsWith('projects'))return 'Projects';if(o==='board')return 'Board';if(o==='unassigned')return 'Unassigned';if(o.startsWith('operations')||o==='source-worker'||o.startsWith('gpt-')||o.includes(':'))return 'Operations';return owner||'unassigned'}
+function ownerLabel(owner){const o=String(owner||'').toLowerCase();if(o==='technology'||o.startsWith('claude'))return 'CTO';if(o==='research'||o.startsWith('research')||o.startsWith('grok'))return 'Research';if(o==='creative')return 'Creative';if(o==='projects'||o.startsWith('projects'))return 'Projects';if(o==='board')return 'Board';if(o==='unassigned')return 'Unassigned';if(o.startsWith('operations')||o==='source-worker'||o.startsWith('gpt-')||o.includes(':'))return 'Operations';return owner||'unassigned'}
 // Suggested tasks wait here for Brandon's approval. Nothing reaches the ledger until Approve.
 function suggestionRows(){return suggestions.map((t,i)=>`<article class="task-row suggested"><div><strong>${escape(t.title)}</strong><small><span class="chip">suggested</span>${escape(t.owner||ownerLabel(t.director))} · needs your approval</small></div><span><button type="button" data-approve="${i}">Approve</button> <button type="button" data-dismiss="${i}">Dismiss</button></span></article>`).join('')}
 function wireSuggestions(panel){
@@ -189,7 +189,7 @@ window.receive=({event,data})=>{
  case'debateRound':queueDebate(data.turns||[],{agreement:false,banner:'LIVE · round '+data.round+' · model output'});if((data.silent||[]).length)notice('No answer this round from: '+data.silent.join(', '));break;
  case'debateResult':{debateLive=false;updateDebateControls();const line=data.failed?data.decision:(data.agreed?'Agreed. ':'No consensus. ')+data.decision;queueDebate([{seat:'jarvis',text:line}],{agreement:!!data.agreed,summary:data.decision,banner:data.failed?'LIVE · debate failed':'LIVE · chair: '+(data.chair||'')});if(!data.failed){messages.push({role:'assistant',text:'Board debate: '+data.topic+'\n\n'+(data.agreed?'Agreed':'No consensus')+' after '+data.rounds+' round'+(data.rounds===1?'':'s')+': '+data.decision+'\n\n'+(data.transcript||'')});saveMessages()}notice(data.failed?data.decision:'Board debate finished. The transcript is in Conversation and on the task list.');if(data.announce==='page'&&data.announcement&&(spoken||conversationActive))native({action:'speak',text:data.announcement,voice:voices.Jarvis,conversation:conversationActive});break}
  case'debateStopped':debateLive=false;updateDebateControls();stopBoardDebate();break;
- case'grokStatus':grokConnected=!!(data&&data.connected);if(data&&data.model)grokModel=data.model;renderVoices();break;
+ case'grokStatus':grokConnected=!!(data&&data.connected);if(data&&data.model)grokModel=data.model;researchFallback=data&&data.fallback||'';renderVoices();break;
  case'creativeStatus':cursorConnected=!!(data&&data.connected);if(data&&typeof data.model==='string')cursorModel=data.model;if(data&&data.repo)cursorRepo=data.repo;renderVoices();break;
  case'taskResult':taskActive=false;$('stopTask').hidden=true;messages.push({role:'assistant',text:(data.success?'Task completed.\n\n':'Task needs attention.\n\n')+data.text});saveMessages();notice(data.success?'Background task finished. Open Conversation for the result.':'Background task needs attention. Open Conversation.');break;
  case'inputLevel':$('inputMeter').value=Number(data)||0;break;

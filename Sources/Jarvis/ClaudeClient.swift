@@ -108,6 +108,82 @@ enum ClaudeClient {
         }
         round(maxToolRounds)
     }
+    // MARK: Research with Claude's server-side web search (used when Grok is unavailable).
+    static let webSearchTool: [String: Any] = ["type": "web_search_20260209", "name": "web_search", "max_uses": 5]
+    /// Models that accept the server-side refusal fallback (`fallbacks: "default"`).
+    static func supportsFallback(_ model: String) -> Bool {
+        ["claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5-2"].contains(model)
+    }
+    static func searchBody(model: String, system: String, messages: [[String: Any]]) -> [String: Any] {
+        var body: [String: Any] = ["model": model, "max_tokens": 8000, "system": system, "tools": [webSearchTool], "messages": messages]
+        if supportsFallback(model) { body["fallbacks"] = "default" }
+        return body
+    }
+    /// The answer text followed by the web sources Claude cited (deduplicated, in order).
+    static func searchReport(_ blocks: [[String: Any]]) -> String? {
+        var parts: [String] = [], cited: [String] = [], searched: [String] = []
+        /// Every "url" inside a search result block, however deeply the result list is nested.
+        func urls(in value: Any) -> [String] {
+            if let item = value as? [String: Any] { return ((item["url"] as? String).map { [$0] } ?? []) + item.values.flatMap { urls(in: $0) } }
+            if let list = value as? [Any] { return list.flatMap { urls(in: $0) } }
+            return []
+        }
+        for block in blocks {
+            switch block["type"] as? String {
+            case "text":
+                if let text = block["text"] as? String { parts.append(text) }
+                for citation in block["citations"] as? [[String: Any]] ?? [] {
+                    if let url = citation["url"] as? String, url.hasPrefix("http"), !cited.contains(url) { cited.append(url) }
+                }
+            case "web_search_tool_result":
+                for url in urls(in: block["content"] ?? []) where url.hasPrefix("http") && !searched.contains(url) { searched.append(url) }
+            default: break
+            }
+        }
+        let text = parts.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        // Prefer what Claude cited; otherwise list the pages its searches returned.
+        if !cited.isEmpty { return text + "\n\nSources:\n" + cited.prefix(12).map { "- " + $0 }.joined(separator: "\n") }
+        if !searched.isEmpty { return text + "\n\nSources searched:\n" + searched.prefix(8).map { "- " + $0 }.joined(separator: "\n") }
+        return text
+    }
+    /// Claude answers with live web search. Resumes paused turns (the server's search loop has its own limit) up to 3 times.
+    /// Completion gets the report, or nil plus a plain reason.
+    static func research(_ prompt: String, model: String, apiKey: String, system: String, isCancelled: @escaping () -> Bool, completion: @escaping (String?, String?) -> Void) {
+        var messages: [[String: Any]] = [["role": "user", "content": String(prompt.prefix(12000))]]
+        func send(_ continuations: Int) {
+            if isCancelled() { return }
+            var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 300
+            request.setValue("application/json", forHTTPHeaderField: "content-type")
+            authorize(&request, apiKey)
+            if supportsFallback(model) { request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta") }
+            request.httpBody = try? JSONSerialization.data(withJSONObject: searchBody(model: model, system: system, messages: messages))
+            URLSession.shared.dataTask(with: request) { data, response, _ in
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                DispatchQueue.main.async {
+                    if isCancelled() { return }
+                    guard status == 200, let json, let blocks = json["content"] as? [[String: Any]] else {
+                        let message = ((json?["error"] as? [String: Any])?["message"] as? String).map { ": " + String($0.prefix(160)) } ?? ""
+                        completion(nil, "Claude research failed (HTTP \(status))" + message); return
+                    }
+                    switch json["stop_reason"] as? String {
+                    case "refusal": completion(nil, "Claude declined this research request.")
+                    case "pause_turn" where continuations > 0:
+                        // Resend the history with the paused assistant turn; the server resumes the search by itself.
+                        messages.append(["role": "assistant", "content": blocks])
+                        send(continuations - 1)
+                    default:
+                        let report = searchReport(blocks)
+                        completion(report, report == nil ? "Claude returned no research report." : nil)
+                    }
+                }
+            }.resume()
+        }
+        send(3)
+    }
     private static func authorize(_ request: inout URLRequest, _ apiKey: String) {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")

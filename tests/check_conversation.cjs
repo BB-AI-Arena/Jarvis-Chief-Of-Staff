@@ -308,6 +308,16 @@ console.log('PASS: active and recent tasks render, and Stop targets the running 
   assert.match(calls.find(c => c.action === 'speak').text, /finished: Review the ledger/);
   assert.match(w.document.getElementById('notice').textContent, /finished: Review the ledger/);
   console.log('PASS: Jarvis speaks a finished result on the page when no live voice is relaying it');
+  w.receive({event:'grokStatus', data:{connected:false, model:'grok-4.7', fallback:'claude-sonnet-5-5'}});
+  const researchSeat = w.document.querySelector('.seat.right');
+  assert.equal(researchSeat.classList.contains('disconnected'), false);
+  assert.match(researchSeat.textContent, /Claude · web search/);
+  w.receive({event:'grokStatus', data:{connected:false, model:'grok-4.7', fallback:''}});
+  assert.equal(w.document.querySelector('.seat.right').classList.contains('disconnected'), true);
+  w.receive({event:'taskUpdate', data:[{id:'r1', state:'running', verified:false, owner:'research · claude-sonnet-5-5', title:'Survey competitors', createdAt:'', updatedAt:'', resultSummary:''}]});
+  assert.match(w.document.getElementById('boardTasks').textContent, /Research/);
+  assert.doesNotMatch(w.document.getElementById('boardTasks').textContent, /CTO/);
+  console.log('PASS: with Grok off, the Research seat shows Claude standing in, and its tasks stay labelled Research');
   w.receive({event:'projectsStatus', data:{connected:false, model:''}});
   assert.match(w.document.querySelector('.seat.projects').textContent, /not connected/);
   w.receive({event:'projectsStatus', data:{connected:true, model:'gemma4:latest'}});

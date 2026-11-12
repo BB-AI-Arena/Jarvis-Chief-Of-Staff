@@ -399,7 +399,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     func seatReady(_ director: String) -> (connected: Bool, busy: Bool) {
         switch director {
         case "technology": return (claudeConnected, seatRuns[director] != nil)
-        case "research": return (grokConnected, seatRuns[director] != nil)
+        case "research": return (grokConnected || claudeConnected, seatRuns[director] != nil)
         case "creative": return (cursorConnected, seatRuns[director] != nil)
         case "projects": return (projectsModel != nil, seatRuns[director] != nil)
         case "operations": return (AgentRuntime.executable != nil, tasks["work"] != nil)
@@ -533,19 +533,29 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         send("taskSuggestion", ["title": title, "director": director, "owner": directorTitle(director)])
     }
     func sendSeatStatus() {
-        send("grokStatus", ["connected": grokConnected, "model": grokModel])
+        send("grokStatus", ["connected": grokConnected, "model": grokModel, "fallback": !grokConnected && claudeConnected ? claudeModel : ""])
         send("creativeStatus", ["connected": cursorConnected, "model": cursorModel, "repo": cursorRepo])
         send("projectsStatus", ["connected": projectsModel != nil, "model": projectsModel ?? ""])
         // A seat that just connected starts whatever is queued for it.
         dispatchAll()
     }
-    /// Research runs with live web search when xAI allows it, and says so when it could not search.
+    /// Research runs on Grok with live web search. When Grok is not connected it falls back to Claude with web search.
     func startGrok(_ parent: TaskRecord) {
-        guard let apiKey = GrokCredential.read() else { return }
-        let model = grokModel, memoryContext = memory.context()
-        runSeat("research", parent: parent, owner: model) { [weak self] taskID, done in
-            let system = Personas.system("research", fallback: GrokClient.researchFallback) + "\n\nThis call is an assignment from Jarvis. Use live web search for anything current, cite your sources, and separate facts from estimates." + memoryContext
-            GrokClient.researchLive(parent.title, model: model, apiKey: apiKey, system: system, isCancelled: { [weak self] in self?.seatRuns["research"] != taskID }) { text, _ in done(text, nil) }
+        let memoryContext = memory.context()
+        let system = Personas.system("research", fallback: GrokClient.researchFallback) + "\n\nThis call is an assignment from Jarvis. Use live web search for anything current, cite your sources, and separate facts from estimates." + memoryContext
+        if grokConnected, let apiKey = GrokCredential.read() {
+            let model = grokModel
+            runSeat("research", parent: parent, owner: model) { [weak self] taskID, done in
+                GrokClient.researchLive(parent.title, model: model, apiKey: apiKey, system: system, isCancelled: { [weak self] in self?.seatRuns["research"] != taskID }) { text, _ in done(text, nil) }
+                return nil
+            }
+            return
+        }
+        guard claudeConnected, let apiKey = ClaudeCredential.read() else { return }
+        let model = claudeModel
+        runSeat("research", parent: parent, owner: "research · " + model) { [weak self] taskID, done in
+            self?.noteTask(taskID, summary: "Grok is not connected, so Claude is researching with web search")
+            ClaudeClient.research(parent.title, model: model, apiKey: apiKey, system: system + "\n\nYou are standing in for Grok, which is not connected; research as the Director of Research.", isCancelled: { [weak self] in self?.seatRuns["research"] != taskID }) { text, failure in done(text, failure) }
             return nil
         }
     }
@@ -1324,6 +1334,18 @@ if CommandLine.arguments.contains("--self-test") {
         let ok = text != nil && !used.isEmpty && (text ?? "").contains("TaskLedger")
         print((ok ? "PASS  " : "FAIL  ") + "CTO answered from the code: " + (text.map { String($0.prefix(300)) } ?? "no reply"))
         exit(ok ? 0 : 1)
+    }
+    dispatchMain()
+} else if CommandLine.arguments.contains("--research-check") {
+    // Headless: one real Research question answered by Claude with live web search (the fallback used when Grok is off).
+    guard let apiKey = ClaudeCredential.read() else { print("FAIL  no Anthropic key in Keychain"); exit(1) }
+    let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis")
+    let start = Date()
+    ClaudeClient.research("In two sentences: what are two widely used field-service scheduling apps for small handyman businesses? Cite sources.", model: HealthCheck.Settings.load(support: support).claudeModel, apiKey: apiKey, system: GrokClient.researchFallback, isCancelled: { false }) { text, failure in
+        let cited = text?.contains("Sources:\n- http") == true || text?.contains("Sources searched:\n- http") == true
+        print((text != nil && cited ? "PASS  " : "FAIL  ") + "Claude web research in \(Int(Date().timeIntervalSince(start))) s" + (cited ? " with cited sources" : " WITHOUT sources"))
+        print(text ?? failure ?? "no reply")
+        exit(text != nil && cited ? 0 : 1)
     }
     dispatchMain()
 } else if CommandLine.arguments.contains("--health") {
