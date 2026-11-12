@@ -95,7 +95,7 @@ struct ComfyVideo: ShotRenderer {
         }.resume()
     }
     func render(_ shot: VideoPlan.Shot, to file: URL, isCancelled: @escaping () -> Bool, completion: @escaping (URL?, String?) -> Void) {
-        let filled = VideoPlan.fill(workflow, prompt: shot.prompt, frames: VideoPlan.frames(seconds: shot.seconds), seconds: shot.seconds, seed: Int.random(in: 1...999_999_999))
+        let filled = VideoPlan.fill(workflow, prompt: shot.prompt, frames: VideoPlan.frames(seconds: shot.seconds, fps: VideoPlan.fps(in: workflow)), seconds: shot.seconds, seed: Int.random(in: 1...999_999_999))
         var request = URLRequest(url: URL(string: server + "/prompt")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 30

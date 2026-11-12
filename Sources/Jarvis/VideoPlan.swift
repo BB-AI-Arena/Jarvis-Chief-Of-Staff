@@ -111,8 +111,19 @@ enum VideoPlan {
     static func hasPromptSlot(_ workflow: [String: Any]) -> Bool {
         (try? JSONSerialization.data(withJSONObject: workflow)).flatMap { String(data: $0, encoding: .utf8) }?.contains("{{prompt}}") == true
     }
-    /// Wan 2.2 renders at 16 frames per second, and its length must be 4n+1 frames.
-    static func frames(seconds: Int, fps: Int = 16) -> Int { ((seconds * fps) / 4) * 4 + 1 }
+    /// Frame count for a shot: 8n+1, which suits LTX-2 (8n+1) and Wan 2.2 (4n+1) alike.
+    static func frames(seconds: Int, fps: Int = 24) -> Int { ((seconds * fps) / 8) * 8 + 1 }
+    /// The workflow's frame rate, read from a CreateVideo "fps" or an LTX "frame_rate" input. Default 24 (LTX-2).
+    static func fps(in workflow: [String: Any]) -> Int {
+        for key in workflow.keys.sorted() {
+            guard let inputs = (workflow[key] as? [String: Any])?["inputs"] as? [String: Any] else { continue }
+            for name in ["fps", "frame_rate"] {
+                if let value = inputs[name] as? Double, value >= 1, value <= 120 { return Int(value.rounded()) }
+                if let value = inputs[name] as? Int, value >= 1, value <= 120 { return value }
+            }
+        }
+        return 24
+    }
     /// The first video file ComfyUI reports in a finished prompt's history, as (filename, subfolder, type).
     static func comfyOutput(_ history: [String: Any]) -> (filename: String, subfolder: String, type: String)? {
         guard let outputs = history["outputs"] as? [String: Any] else { return nil }

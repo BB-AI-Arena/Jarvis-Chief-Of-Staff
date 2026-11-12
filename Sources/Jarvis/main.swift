@@ -1482,16 +1482,18 @@ if CommandLine.arguments.contains("--self-test") {
     }
     dispatchMain()
 } else if CommandLine.arguments.contains("--video-check") {
-    // Headless: renders one 4-second shot on Grok Imagine (about $0.32) and joins it twice, to prove render + download + stitch.
-    guard let apiKey = GrokCredential.read() else { print("FAIL  no xAI key in Keychain"); exit(1) }
-    let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Jarvis Workspace/Video/check-\(Int(Date().timeIntervalSince1970))")
+    // Headless: renders one 4-second shot and joins it twice, to prove render + download + stitch.
+    // Default is Grok Imagine (about $0.32); --comfy uses DARK's 4090 (free), starting ComfyUI over SSH if needed.
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let folder = home.appendingPathComponent("Documents/Jarvis Workspace/Video/check-\(Int(Date().timeIntervalSince1970))")
     try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let start = Date()
     let shot = VideoPlan.Shot(prompt: "Cinematic close-up of raindrops falling in slow motion past a red neon sign at night, shallow depth of field, film grain", seconds: 4)
-    GrokVideo(apiKey: apiKey).render(shot, to: folder.appendingPathComponent("shot-1.mp4"), isCancelled: { false }) { file, failure in
+    func renderCheck(_ renderer: ShotRenderer, name: String) {
+      renderer.render(shot, to: folder.appendingPathComponent("shot-1.mp4"), isCancelled: { false }) { file, failure in
         guard let file else { print("FAIL  render: " + (failure ?? "unknown")); exit(1) }
         let size = ((try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int) ?? 0
-        print("PASS  rendered 1 shot on Grok Imagine in \(Int(Date().timeIntervalSince(start))) s · \(size / 1024) KB")
+        print("PASS  rendered 1 shot on \(name) in \(Int(Date().timeIntervalSince(start))) s · \(size / 1024) KB")
         VideoStitcher.join([file, file], to: folder.appendingPathComponent("final.mp4")) { ok in
             Task {
                 let asset = AVURLAsset(url: folder.appendingPathComponent("final.mp4"))
@@ -1504,6 +1506,23 @@ if CommandLine.arguments.contains("--self-test") {
                 exit(ok && seconds > 6 ? 0 : 1)
             }
         }
+      }
+    }
+    if CommandLine.arguments.contains("--comfy") {
+        let support = home.appendingPathComponent("Library/Application Support/Jarvis")
+        let server = ComfyVideo.defaultServer
+        let workflowFile = home.appendingPathComponent("Documents/Jarvis Workspace/Video/comfyui-workflow-api.json")
+        guard let data = try? Data(contentsOf: workflowFile), let workflow = try? JSONSerialization.jsonObject(with: data) as? [String: Any], VideoPlan.hasPromptSlot(workflow) else {
+            print("FAIL  no ComfyUI workflow with {{prompt}} at " + workflowFile.path); exit(1)
+        }
+        DarkServer.load(support: support).ensureComfy(server: server) { up, note in
+            print((up ? "PASS  " : "FAIL  ") + note)
+            guard up else { exit(1) }
+            renderCheck(ComfyVideo(server: server, workflow: workflow), name: "the 4090 (ComfyUI)")
+        }
+    } else {
+        guard let apiKey = GrokCredential.read() else { print("FAIL  no xAI key in Keychain"); exit(1) }
+        renderCheck(GrokVideo(apiKey: apiKey), name: "Grok Imagine")
     }
     dispatchMain()
 } else if CommandLine.arguments.contains("--health") {

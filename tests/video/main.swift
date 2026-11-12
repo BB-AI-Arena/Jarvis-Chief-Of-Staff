@@ -44,7 +44,11 @@ let filled = VideoPlan.fill(workflow, prompt: "Neon rooftop", frames: 81, second
 let text = ((filled["6"] as! [String: Any])["inputs"] as! [String: Any])["text"] as? String
 let inputs = (filled["50"] as! [String: Any])["inputs"] as! [String: Any]
 assert(text == "Neon rooftop, cinematic" && inputs["length"] as? Int == 81 && inputs["seed"] as? Int == 42 && inputs["steps"] as? Int == 20)
-assert(VideoPlan.frames(seconds: 5) == 81 && VideoPlan.frames(seconds: 3) == 49 && (VideoPlan.frames(seconds: 4) - 1) % 4 == 0)
+assert(VideoPlan.frames(seconds: 5) == 121 && VideoPlan.frames(seconds: 5, fps: 16) == 81 && (VideoPlan.frames(seconds: 7) - 1) % 8 == 0)
+assert(VideoPlan.fps(in: ["18": ["class_type": "CreateVideo", "inputs": ["fps": 24.0]]]) == 24 && VideoPlan.fps(in: ["5": ["inputs": ["frame_rate": 16]]]) == 16 && VideoPlan.fps(in: [:]) == 24)
+let ltx = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: "tests/video/ltx-workflow.json"))) as! [String: Any]
+let ltxFilled = VideoPlan.fill(ltx, prompt: "Rooftop drop", frames: VideoPlan.frames(seconds: 5, fps: VideoPlan.fps(in: ltx)), seconds: 5, seed: 7) as! [String: Any]
+assert(VideoPlan.hasPromptSlot(ltx) && ((ltxFilled["6"] as! [String: Any])["inputs"] as! [String: Any])["length"] as? Int == 121 && ((ltxFilled["10"] as! [String: Any])["inputs"] as! [String: Any])["noise_seed"] as? Int == 7)
 let history: [String: Any] = ["status": ["status_str": "success", "completed": true], "outputs": ["9": ["images": [["filename": "frame.png", "subfolder": "", "type": "output"]]], "12": ["gifs": [["filename": "Wan_00001.mp4", "subfolder": "video", "type": "output"]]]]]
 let output = VideoPlan.comfyOutput(history)!
 assert(output.filename == "Wan_00001.mp4" && output.subfolder == "video" && output.type == "output")
