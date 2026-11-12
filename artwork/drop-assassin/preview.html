@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drop Assassin — artwork proposal</title>
+<style>
+  :root {
+    --void: #07080C;
+    --armor: #14161E;
+    --lime: #D6FF3F;
+    --lock: #FF2D7B;
+    --porcelain: #F4F1EA;
+    --steel: #8B95A8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--void); color: var(--porcelain); }
+  body {
+    font-family: Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    line-height: 1.4;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 48px 28px 96px; }
+  .meta {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--steel);
+    margin: 0 0 28px;
+  }
+  h1 { margin: 0; }
+  h1 img { width: min(640px, 100%); height: auto; display: block; }
+  .tag {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    letter-spacing: 0.12em;
+    font-size: 13px;
+    margin: 18px 0 40px;
+  }
+  figure { margin: 0 0 28px; }
+  img.plate { width: 100%; height: auto; display: block; background: var(--armor); }
+  figcaption {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--steel);
+    margin-top: 10px;
+  }
+  .grid { display: grid; grid-template-columns: 1.1fr 1.1fr 1fr; gap: 16px; margin: 8px 0 48px; align-items: stretch; }
+  .grid figure { display: flex; flex-direction: column; margin: 0; }
+  .grid figcaption { margin-top: auto; padding-top: 10px; }
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin: 8px 0 48px; }
+  .swatch { min-height: 92px; padding: 12px; display: flex; flex-direction: column; justify-content: flex-end; }
+  .swatch b { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; }
+  .swatch span { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; }
+  h2 {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--steel);
+    margin: 12px 0 16px;
+  }
+  .voice p { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.03em; }
+  .motion {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 28px;
+    align-items: center;
+    background: var(--armor);
+    padding: 28px;
+    margin-bottom: 48px;
+  }
+  .mark { width: 140px; height: auto; display: block; }
+  button {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--porcelain);
+    background: transparent;
+    border: 1px solid var(--steel);
+    padding: 12px 16px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--lime); color: var(--lime); }
+  button:focus-visible { outline: 2px solid var(--lime); outline-offset: 3px; }
+  .times { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13px; color: var(--steel); margin: 16px 0 0; }
+  .on-light { background: var(--porcelain); color: var(--void); padding: 36px 28px; display: flex; gap: 28px; align-items: center; margin-bottom: 48px; }
+  .on-light img { width: min(420px, 70%); height: auto; }
+  .on-light svg { width: 72px; height: auto; flex: none; }
+  .files { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13px; color: var(--steel); columns: 2; margin: 0; }
+  .files li { margin: 0 0 6px; break-inside: avoid; }
+  #needle { transform-box: fill-box; }
+  .mark.play #needle { animation: fall 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .mark.play #bar { animation: lock 90ms linear 220ms both; }
+  @keyframes fall {
+    from { transform: translateY(-28px); }
+    to { transform: none; }
+  }
+  @keyframes lock {
+    from { fill: #D6FF3F; }
+    to { fill: #FF2D7B; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mark.play #needle, .mark.play #bar { animation: none; }
+  }
+  @media (max-width: 800px) {
+    .grid, .swatches, .motion, .files { grid-template-columns: 1fr; columns: 1; }
+    .voice p { font-size: 22px; }
+    .on-light { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <p class="meta">Proposal for Brandon · not in the app</p>
+  <h1><img src="lockup.svg" alt="Drop Assassin"></h1>
+  <p class="tag">One drop. No second pass.</p>
+
+  <figure>
+    <img class="plate" src="poster-wide.png" alt="Wide poster. The mark and the name sit in the black on the left. The figure crouches on the right, visor lit lime, a vertical lime line behind them.">
+    <figcaption>poster-wide.png · 1280×720</figcaption>
+  </figure>
+  <figure>
+    <img class="plate" src="poster-portrait.png" alt="Portrait poster. A black panel with the mark and the name, beside the figure landing on one knee.">
+    <figcaption>poster-portrait.png · 1720×1440</figcaption>
+  </figure>
+
+  <h2>Plates</h2>
+  <div class="grid">
+    <figure>
+      <img class="plate" src="character-bust.jpg" alt="Bust of the operative. Matte black helmet, round temple discs, one lime visor slit, a small chevron on the chest.">
+      <figcaption>Bust · helmet reference</figcaption>
+    </figure>
+    <figure>
+      <img class="plate" src="character-landing.jpg" alt="Full figure landing on one knee, one hand planted, lime line through the frame.">
+      <figcaption>Landing · action</figcaption>
+    </figure>
+    <figure>
+      <img class="plate" src="character-helmet.jpg" alt="Square close-up of the black helmet with a lime slit and magenta temple lights.">
+      <figcaption>Helmet · square</figcaption>
+    </figure>
+  </div>
+
+  <h2>Palette</h2>
+  <div class="swatches">
+    <div class="swatch" style="background:#07080C;border:1px solid #2A2E3A;color:#F4F1EA"><b>Void</b><span>#07080C</span></div>
+    <div class="swatch" style="background:#14161E;color:#F4F1EA"><b>Armor</b><span>#14161E</span></div>
+    <div class="swatch" style="background:#D6FF3F;color:#07080C"><b>Strike</b><span>#D6FF3F</span></div>
+    <div class="swatch" style="background:#FF2D7B;color:#07080C"><b>Lock</b><span>#FF2D7B</span></div>
+    <div class="swatch" style="background:#F4F1EA;color:#07080C"><b>Porcelain</b><span>#F4F1EA</span></div>
+    <div class="swatch" style="background:#8B95A8;color:#07080C"><b>Steel</b><span>#8B95A8</span></div>
+  </div>
+
+  <h2>On a light ground</h2>
+  <div class="on-light">
+    <svg viewBox="0 0 100 124" aria-hidden="true">
+      <path fill="#07080C" d="M45 12H55V40H70V56L50 118L30 56V40H45Z"/>
+      <rect x="0" y="36" width="100" height="24" rx="12" fill="#FF2D7B"/>
+    </svg>
+    <img src="wordmark-on-light.svg" alt="Drop Assassin wordmark in void black, for light grounds.">
+  </div>
+
+  <h2>Voice</h2>
+  <div class="voice">
+    <p>One drop. No second pass.</p>
+    <p>Land it once.</p>
+    <p>The room goes quiet. Then it’s done.</p>
+  </div>
+
+  <h2>Motion</h2>
+  <div class="motion">
+    <div>
+      <svg class="mark" id="mark" viewBox="0 0 100 124" role="img" aria-label="Drop Assassin mark. A lime needle through a magenta bar.">
+        <path id="needle" fill="#D6FF3F" d="M45 12H55V40H70V56L50 118L30 56V40H45Z"/>
+        <rect id="bar" x="0" y="36" width="100" height="24" rx="12" fill="#FF2D7B"/>
+      </svg>
+    </div>
+    <div>
+      <button type="button" id="replay">Replay the drop</button>
+      <p class="times">Fall 280ms. Lock 90ms, starting at 220ms. No bounce. Reduced motion holds the settled frame.</p>
+    </div>
+  </div>
+
+  <h2>Files</h2>
+  <ul class="files">
+    <li>mark.svg</li>
+    <li>mark-mono.svg</li>
+    <li>wordmark.svg</li>
+    <li>wordmark-on-light.svg</li>
+    <li>lockup.svg</li>
+    <li>lockup-stack.svg</li>
+    <li>icon.svg</li>
+    <li>icon-1024.png</li>
+    <li>character-bust.jpg</li>
+    <li>character-landing.jpg</li>
+    <li>character-helmet.jpg</li>
+    <li>character-wide.jpg</li>
+    <li>poster-wide.png</li>
+    <li>poster-portrait.png</li>
+    <li>style-guide.png</li>
+    <li>preview.html</li>
+    <li>DESIGN.md</li>
+  </ul>
+</main>
+<script>
+  const mark = document.getElementById("mark");
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function play() {
+    if (reduce) return;
+    mark.classList.remove("play");
+    void mark.offsetWidth;
+    mark.classList.add("play");
+  }
+  document.getElementById("replay").addEventListener("click", play);
+  play();
+</script>
+</body>
+</html>
