@@ -57,6 +57,8 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     /// The voice delegation that asked for a task, so its result can be relayed in the same conversation.
     struct LiveReply { let update: (String) -> Void; weak var voice: CloudVoice? }
     var liveReplies: [String: LiveReply] = [:]
+    /// Models on the 4090's Ollama, refreshed at launch; the Operations roster lists these.
+    var serverModels: [String] = []
     var grokModel = GrokClient.defaultModel
     var grokConnected = false
     var cursorModel = ""
@@ -90,9 +92,11 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         if let stored = try? String(contentsOf: support.appendingPathComponent("grok-model.txt"), encoding: .utf8), let model = GrokClient.sanitize(stored) { grokModel = model }
         if let stored = try? String(contentsOf: support.appendingPathComponent("cursor-model.txt"), encoding: .utf8), let model = CursorClient.sanitizeModel(stored) { cursorModel = model }
         if let stored = try? String(contentsOf: support.appendingPathComponent("cursor-repo.txt"), encoding: .utf8), let repo = CursorClient.sanitizeRepo(stored) { cursorRepo = repo }
+        OllamaClient.base = (try? String(contentsOf: support.appendingPathComponent("ollama-host.txt"), encoding: .utf8)).flatMap(OllamaClient.sanitizeHost) ?? OllamaClient.defaultServer
         if let stored = try? String(contentsOf: support.appendingPathComponent("projects-model.txt"), encoding: .utf8), let model = OllamaClient.sanitize(stored) { projectsModel = model }
         refreshCursor(announce: false)
         refreshGrok(announce: false)
+        OllamaClient.models { [weak self] names in self?.serverModels = names ?? [] }
         brain.warm()
         NSApp.setActivationPolicy(.regular)
         let menu = NSMenu()
@@ -220,6 +224,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         case "setCreativeRepo": storeCursorRepo(body["repo"] as? String ?? "")
         case "configureCursor": configureCursor()
         case "health": runHealthCheck(startup: false)
+        case "configureDark": configureDark()
         case "setProjectsModel": storeProjectsModel(body["model"] as? String ?? "")
         case "debate":
             let result = startDebate(body["topic"] as? String ?? "")
@@ -352,14 +357,21 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     func saveResult(_ id: String, title: String, director: String, text: String) {
         guard UUID(uuidString: id) != nil else { return }
         try? FileManager.default.createDirectory(at: resultsDirectory, withIntermediateDirectories: true)
-        let slug = title.replacingOccurrences(of: "[^A-Za-z0-9 ]+", with: " ", options: .regularExpression).split(separator: " ").prefix(8).joined(separator: " ")
-        let name = "\(TaskLedger.timestamp().prefix(10)) \(slug.prefix(60)) \(id.prefix(8).lowercased()).md"
+        let name = resultBase(id, title: title) + ".md"
         let document = "# \(title)\n\n\(director) · \(TaskLedger.timestamp())\n\n---\n\n\(text)\n"
         try? document.write(to: resultsDirectory.appendingPathComponent(name), atomically: true, encoding: .utf8)
     }
+    /// "<date> <title words> <first 8 of the id>": the result document's name, and the folder name for files a task produces.
+    func resultBase(_ id: String, title: String) -> String {
+        if let existing = resultFile(id) { return String(existing.deletingPathExtension().lastPathComponent) }
+        let slug = title.replacingOccurrences(of: "[^A-Za-z0-9 ]+", with: " ", options: .regularExpression).split(separator: " ").prefix(8).joined(separator: " ")
+        return "\(TaskLedger.timestamp().prefix(10)) \(slug.prefix(60)) \(id.prefix(8).lowercased())"
+    }
+    /// Opens the finished video when the task made one, otherwise the result document.
     func openResult(_ id: String) {
         guard let file = resultFile(id), FileManager.default.fileExists(atPath: file.path) else { send("notice", "There is no saved result for that task."); return }
-        NSWorkspace.shared.open(file)
+        let video = file.deletingPathExtension().appendingPathComponent("final.mp4")
+        NSWorkspace.shared.open(FileManager.default.fileExists(atPath: video.path) ? video : file)
     }
     func updateTask(_ id: String, state: String, summary: String) {
         var records = ledger.load()
@@ -400,7 +412,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         switch director {
         case "technology": return (claudeConnected, seatRuns[director] != nil)
         case "research": return (grokConnected || claudeConnected, seatRuns[director] != nil)
-        case "creative": return (cursorConnected, seatRuns[director] != nil)
+        case "creative": return (cursorConnected || grokConnected || comfyWorkflow() != nil, seatRuns[director] != nil)
         case "projects": return (projectsModel != nil, seatRuns[director] != nil)
         case "operations": return (AgentRuntime.executable != nil, tasks["work"] != nil)
         default: return (false, false)
@@ -561,6 +573,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     }
     /// Creative work runs as a Cursor cloud agent on the configured repository. The ledger keeps the agent link.
     func startCreative(_ parent: TaskRecord) {
+        if VideoPlan.isVideoRequest(parent.title), grokConnected || comfyWorkflow() != nil { startVideo(parent); return }
         guard let apiKey = CursorCredential.read() else { return }
         let repo = cursorRepo, model = cursorModel, task = parent.title
         let prompt = CursorClient.prompt(persona: Personas.system("creative", fallback: "You are Jarvis's Creative Director. Own the look, feel, naming and copy. Do not invent results."), brief: task)
@@ -576,6 +589,89 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             }
             return nil
         }
+    }
+    // MARK: Video. Creative plans the shots; the 4090 (ComfyUI) renders when reachable, Grok Imagine otherwise.
+    var comfyServer: String { (try? String(contentsOf: support.appendingPathComponent("comfy-url.txt"), encoding: .utf8)).flatMap(OllamaClient.sanitizeHost) ?? ComfyVideo.defaultServer }
+    var comfyWorkflowFile: URL { workspace.appendingPathComponent("Video/comfyui-workflow-api.json") }
+    /// The exported ComfyUI workflow, when it exists and has a "{{prompt}}" slot.
+    func comfyWorkflow() -> [String: Any]? {
+        guard let data = try? Data(contentsOf: comfyWorkflowFile), let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], VideoPlan.hasPromptSlot(json) else { return nil }
+        return json
+    }
+    func startVideo(_ parent: TaskRecord) {
+        let brief = parent.title, total = VideoPlan.requestedSeconds(parent.title)
+        let workflow = comfyWorkflow(), server = comfyServer, grokKey = grokConnected ? GrokCredential.read() : nil, dark = DarkServer.load(support: support)
+        let folder = resultsDirectory.appendingPathComponent(resultBase(parent.id, title: parent.title))
+        runSeat("creative", parent: parent, owner: "creative · video") { [weak self] taskID, done in
+            let cancelled: () -> Bool = { [weak self] in self?.seatRuns["creative"] != taskID }
+            // 1. Pick the renderer: the 4090 when ComfyUI answers and the workflow is set up, otherwise Grok Imagine.
+            typealias Choice = (VideoPlan.Renderer, ShotRenderer)?
+            let pick: (@escaping (Choice) -> Void) -> Void = { choose in
+                let grok = grokKey.map { (VideoPlan.Renderer.grok, GrokVideo(apiKey: $0) as ShotRenderer) }
+                guard let workflow else { choose(grok); return }
+                // Starts ComfyUI on DARK over SSH when it is not already answering.
+                dark.ensureComfy(server: server) { ok, note in
+                    if !ok { self?.noteTask(taskID, summary: note + (grok == nil ? "" : "; using Grok Imagine")) }
+                    choose(ok ? (.comfy, ComfyVideo(server: server, workflow: workflow)) : grok)
+                }
+            }
+            pick { [weak self] chosen in
+                guard let self, !cancelled() else { return }
+                guard let (renderer, engine) = chosen else { done(nil, "No video renderer is available: ComfyUI on the 4090 is not reachable at \(server) and Grok is not connected."); return }
+                self.noteTask(taskID, summary: "Planning \(total) s of shots for \(renderer.rawValue)")
+                // 2. Plan the shots with the Creative persona (Claude, then Grok, then a plain split of the brief).
+                self.planVideo(brief: brief, total: total, renderer: renderer) { [weak self] plan in
+                    guard let self, !cancelled() else { return }
+                    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    let cost = VideoPlan.cost(plan, renderer: renderer)
+                    self.noteTask(taskID, summary: "Rendering \(plan.shots.count) shots (\(plan.seconds) s) on \(renderer.rawValue)" + (cost > 0 ? String(format: ", about $%.2f", cost) : ", free"))
+                    // 3. Render every shot. ComfyUI queues them on the GPU; Grok runs them in parallel.
+                    var results = [String](repeating: "not rendered", count: plan.shots.count)
+                    var clips = [URL?](repeating: nil, count: plan.shots.count)
+                    var pending = plan.shots.count, finished = 0
+                    for (index, shot) in plan.shots.enumerated() {
+                        engine.render(shot, to: folder.appendingPathComponent("shot-\(index + 1).mp4"), isCancelled: cancelled) { [weak self] file, failure in
+                            guard let self, !cancelled() else { return }
+                            clips[index] = file
+                            results[index] = file != nil ? "shot-\(index + 1).mp4" : "failed: " + (failure ?? "unknown")
+                            pending -= 1
+                            if file != nil { finished += 1 }
+                            self.noteTask(taskID, summary: "Rendered \(finished) of \(plan.shots.count) shots on \(renderer.rawValue)")
+                            guard pending == 0 else { return }
+                            try? VideoPlan.document(plan, brief: brief, renderer: renderer, results: results).write(to: folder.appendingPathComponent("shot-list.md"), atomically: true, encoding: .utf8)
+                            let made = clips.compactMap { $0 }
+                            guard !made.isEmpty else { done(nil, "No shot rendered. First problem: " + (results.first { $0.hasPrefix("failed") } ?? "unknown")); return }
+                            // 4. Join the shots into one file.
+                            self.noteTask(taskID, summary: "Joining \(made.count) shots")
+                            VideoStitcher.join(made, to: folder.appendingPathComponent("final.mp4")) { joined in
+                                let failed = results.filter { $0.hasPrefix("failed") }.count
+                                let where_ = folder.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
+                                let headline = (joined ? "Finished \"\(plan.title)\": \(made.count) shots, \(plan.seconds) seconds, rendered on \(renderer.rawValue)." : "Rendered \(made.count) shots of \"\(plan.title)\" on \(renderer.rawValue), but they could not be joined into one file.")
+                                    + (failed > 0 ? " \(failed) shot\(failed == 1 ? "" : "s") failed." : "")
+                                done(headline + "\n\nVideo: " + (joined ? where_ + "/final.mp4" : where_ + " (separate shots)") + "\n\n" + VideoPlan.document(plan, brief: brief, renderer: renderer, results: results), nil)
+                            }
+                        }
+                    }
+                }
+            }
+            return nil
+        }
+    }
+    func planVideo(brief: String, total: Int, renderer: VideoPlan.Renderer, completion: @escaping (VideoPlan.Plan) -> Void) {
+        let system = VideoPlan.plannerSystem(persona: Personas.system("creative", fallback: "You are Jarvis's Creative Director, a film director with a strong visual style."))
+        let prompt = VideoPlan.plannerPrompt(brief: brief, seconds: total, renderer: renderer)
+        let finish: (String?) -> Bool = { raw in
+            guard let raw, let plan = VideoPlan.parse(raw, renderer: renderer, total: total) else { return false }
+            completion(plan); return true
+        }
+        let grok = { [weak self] in
+            guard let self, self.grokConnected, let key = GrokCredential.read() else { completion(VideoPlan.fallback(brief: brief, total: total, renderer: renderer)); return }
+            GrokClient.research(prompt, model: self.grokModel, apiKey: key, system: system) { raw in
+                if !finish(raw) { completion(VideoPlan.fallback(brief: brief, total: total, renderer: renderer)) }
+            }
+        }
+        guard claudeConnected, let key = ClaudeCredential.read() else { grok(); return }
+        ClaudeClient.review(prompt, model: claudeModel, apiKey: key, system: system) { raw in if !finish(raw) { grok() } }
     }
     /// Polls Get A Run until it reaches a terminal status. Completed tasks stay unverified: the API reports a result, not a check.
     func pollCursor(taskID: String, ids: (agent: String, run: String), apiKey: String, link: String, started: Date, done: @escaping (String?, String?) -> Void) {
@@ -676,14 +772,23 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         sendSeatStatus()
         send("notice", "Creative Director repository set to \(repo).")
     }
-    /// Projects work runs on the local model. It cannot browse, edit files or run commands.
+    /// Projects runs on the 4090's Ollama. If the server does not answer, it falls back to the model saved for this Mac.
     func startProjects(_ parent: TaskRecord) {
         guard let model = projectsModel else { return }
         let memoryContext = memory.context()
-        runSeat("projects", parent: parent, owner: "projects · " + model) { _, done in
-            let system = Personas.system("projects", fallback: OllamaClient.projectsFallback) + "\n\nThis call is an assignment from Jarvis. You run on a local model on this Mac and cannot browse, edit files or run commands. Answer as the Director of Projects." + memoryContext
-            return OllamaClient.chat(parent.title, model: model, system: system) { text in
-                done(text, text == nil ? "The local model \(model) did not answer. Check that Ollama is running and the model is installed." : nil)
+        let fallback = (try? String(contentsOf: support.appendingPathComponent("projects-fallback-model.txt"), encoding: .utf8)).flatMap(OllamaClient.sanitize)
+        runSeat("projects", parent: parent, owner: "projects · " + model) { [weak self] taskID, done in
+            let system = Personas.system("projects", fallback: OllamaClient.projectsFallback) + "\n\nThis call is an assignment from Jarvis. You run on a local model and cannot browse, edit files or run commands. Answer as the Director of Projects." + memoryContext
+            return OllamaClient.chat(parent.title, model: model, system: system) { [weak self] text in
+                if let text { done(text, nil); return }
+                guard let fallback, OllamaClient.base != OllamaClient.local, self?.seatRuns["projects"] == taskID else {
+                    done(nil, "The model \(model) did not answer. Check that Ollama is running on \(OllamaClient.base).")
+                    return
+                }
+                self?.noteTask(taskID, summary: "The 4090 did not answer; using \(fallback) on this Mac")
+                self?.seatRequests["projects"] = OllamaClient.chat(parent.title, model: fallback, system: system, host: OllamaClient.local) { text in
+                    done(text, text == nil ? "Neither the 4090 nor this Mac's \(fallback) answered." : nil)
+                }
             }
         }
     }
@@ -712,6 +817,25 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             self.send("notice", failed.isEmpty ? "Health check finished: nothing failed." : "Health check: " + failed.joined(separator: ", ") + " failed. Details are in Settings.")
             if startup, let line = HealthCheck.startupLine(results) { self.say(line) }
         }
+    }
+    /// One-time SSH setup for DARK: creates Jarvis's own key if needed, then opens Terminal so Brandon types the server password
+    /// into ssh-copy-id himself. Jarvis never sees or stores the password.
+    func configureDark() {
+        let dark = DarkServer.load(support: support)
+        if !dark.hasKey {
+            let keygen = Process()
+            keygen.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
+            keygen.arguments = ["-t", "ed25519", "-f", dark.key, "-N", "", "-C", "jarvis@mac"]
+            keygen.standardOutput = FileHandle.nullDevice; keygen.standardError = FileHandle.nullDevice
+            try? FileManager.default.createDirectory(at: URL(fileURLWithPath: dark.key).deletingLastPathComponent(), withIntermediateDirectories: true)
+            do { try keygen.run(); keygen.waitUntilExit() } catch { send("notice", "Could not create an SSH key for DARK."); return }
+        }
+        dark.save(support: support)
+        let command = "ssh-copy-id -i '\(dark.publicKey)' \(dark.target)"
+        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(command.replacingOccurrences(of: "\"", with: "\\\""))\"\nend tell"
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        send("notice", error == nil ? "Terminal is open: type DARK's password there once. Then run the health check in Settings." : "Open Terminal and run: " + command)
     }
     func storeProjectsModel(_ raw: String) {
         let url = support.appendingPathComponent("projects-model.txt")
@@ -921,7 +1045,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         records[index].state = "running"; records[index].updatedAt = now; records[index].resultSummary = ""
         let manager = OperationsManager.resolve(stored: managerModel, advertised: knownLocalModels)
         var rows = [TaskRecord(id: UUID().uuidString, state: manager == nil ? "failed" : "proposed", verified: false, owner: "operations-manager", parentID: parent.id, createdAt: now, updatedAt: now, resultSummary: manager ?? "manager model not configured", title: "Operations manager")]
-        let roster = knownLocalModels.prefix(4)
+        let roster = (serverModels.isEmpty ? knownLocalModels : serverModels).prefix(4)
         if roster.isEmpty {
             rows.append(TaskRecord(id: UUID().uuidString, state: "proposed", verified: false, owner: "operations-workers", parentID: parent.id, createdAt: now, updatedAt: now, resultSummary: "No local models reported", title: "Local worker roster"))
         } else {
@@ -1346,6 +1470,31 @@ if CommandLine.arguments.contains("--self-test") {
         print((text != nil && cited ? "PASS  " : "FAIL  ") + "Claude web research in \(Int(Date().timeIntervalSince(start))) s" + (cited ? " with cited sources" : " WITHOUT sources"))
         print(text ?? failure ?? "no reply")
         exit(text != nil && cited ? 0 : 1)
+    }
+    dispatchMain()
+} else if CommandLine.arguments.contains("--video-check") {
+    // Headless: renders one 4-second shot on Grok Imagine (about $0.32) and joins it twice, to prove render + download + stitch.
+    guard let apiKey = GrokCredential.read() else { print("FAIL  no xAI key in Keychain"); exit(1) }
+    let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Jarvis Workspace/Video/check-\(Int(Date().timeIntervalSince1970))")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let start = Date()
+    let shot = VideoPlan.Shot(prompt: "Cinematic close-up of raindrops falling in slow motion past a red neon sign at night, shallow depth of field, film grain", seconds: 4)
+    GrokVideo(apiKey: apiKey).render(shot, to: folder.appendingPathComponent("shot-1.mp4"), isCancelled: { false }) { file, failure in
+        guard let file else { print("FAIL  render: " + (failure ?? "unknown")); exit(1) }
+        let size = ((try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int) ?? 0
+        print("PASS  rendered 1 shot on Grok Imagine in \(Int(Date().timeIntervalSince(start))) s · \(size / 1024) KB")
+        VideoStitcher.join([file, file], to: folder.appendingPathComponent("final.mp4")) { ok in
+            Task {
+                let asset = AVURLAsset(url: folder.appendingPathComponent("final.mp4"))
+                let seconds = (try? await asset.load(.duration)).map(CMTimeGetSeconds) ?? 0
+                let tracks = (try? await asset.loadTracks(withMediaType: .video)) ?? []
+                let size = tracks.isEmpty ? .zero : ((try? await tracks[0].load(.naturalSize)) ?? .zero)
+                let audio = ((try? await asset.loadTracks(withMediaType: .audio)) ?? []).isEmpty ? "no sound" : "with sound"
+                print((ok && seconds > 6 ? "PASS  " : "FAIL  ") + String(format: "joined 2 copies: %.1f s, %dx%d, %@", seconds, Int(size.width), Int(size.height), audio))
+                print("Saved: " + folder.path)
+                exit(ok && seconds > 6 ? 0 : 1)
+            }
+        }
     }
     dispatchMain()
 } else if CommandLine.arguments.contains("--health") {

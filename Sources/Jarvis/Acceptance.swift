@@ -1,6 +1,6 @@
 import Foundation
 
-/// Ten realistic requests that must route correctly before a push. `Jarvis --acceptance` sends each through the live router.
+/// Eleven realistic requests that must route correctly before a push. `Jarvis --acceptance` sends each through the live router.
 enum Acceptance {
     struct Case {
         let prompt: String
@@ -20,6 +20,7 @@ enum Acceptance {
         Case(prompt: "Build me a project plan with milestones and dates for the handyman MVP.", history: "", routes: ["assign"], directors: ["projects"]),
         Case(prompt: "Remember that our first target customer is solo handymen.", history: "", routes: ["remember"], directors: []),
         Case(prompt: "I've been going back and forth on pricing lately.", history: "", routes: ["reply", "suggest"], directors: []),
+        Case(prompt: "Create a 30 second cinematic video about Drop Assassin in HD with heavy special effects.", history: "", routes: ["assign"], directors: ["creative"]),
         Case(prompt: "Yes, go ahead.", history: "assistant: Shall I add outlining a simple MVP for solo handymen to the task list for Projects?", routes: ["assign"], directors: [])
     ]
     /// Nil when the decision is acceptable, otherwise why it is not.

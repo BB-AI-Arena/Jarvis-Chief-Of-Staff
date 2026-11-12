@@ -12,3 +12,8 @@ assert(OllamaClient.text(from: Data("{\"message\":{\"role\":\"assistant\",\"cont
 assert(OllamaClient.text(from: Data("{\"message\":{\"content\":\"\"}}".utf8)) == nil)
 assert(OllamaClient.text(from: Data("{\"error\":\"model not found\"}".utf8)) == nil)
 print("PASS: the Projects seat sends a local Ollama chat body and reads only real replies")
+assert(OllamaClient.base == "http://192.168.4.31:11434" && OllamaClient.local == "http://127.0.0.1:11434")
+assert(OllamaClient.sanitizeHost("http://192.168.4.31:11434/") == "http://192.168.4.31:11434")
+assert(OllamaClient.sanitizeHost("http://dark.local:8188") == "http://dark.local:8188")
+for bad in ["https://evil.example.com:11434", "http://user:pw@192.168.4.31:11434", "http://192.168.4.31:11434/api?x=1", "ftp://192.168.4.31", "http://8.8.8.8"] { assert(OllamaClient.sanitizeHost(bad) == nil, bad) }
+print("PASS: Projects talks to the 4090's Ollama by default and only accepts local-network model servers")

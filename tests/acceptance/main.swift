@@ -1,5 +1,5 @@
 import Foundation
-assert(Acceptance.cases.count == 10)
+assert(Acceptance.cases.count == 11)
 let research = Acceptance.cases[1], greeting = Acceptance.cases[3], debate = Acceptance.cases[2]
 assert(Acceptance.problem(RouteDecision(route: "assign", text: "Research competitors", director: "research"), for: research) == nil)
 assert(Acceptance.problem(RouteDecision(route: "assign", text: "Research competitors", director: "creative"), for: research)!.contains("expected research"))

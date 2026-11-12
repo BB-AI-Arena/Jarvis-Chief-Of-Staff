@@ -14,13 +14,17 @@ struct HealthResult {
 }
 
 enum HealthCheck {
-    static let order = ["luna", "voice", "claude", "grok", "projects", "cursor", "operations"]
+    static let order = ["luna", "voice", "claude", "grok", "projects", "cursor", "video", "dark", "operations"]
     struct Settings {
         var claudeModel = ClaudeClient.defaultModel
         var grokModel = GrokClient.defaultModel
         var projectsModel: String?
         var managerModel: String?
         var cursorRepo = CursorClient.defaultRepo
+        var comfyServer = ComfyVideo.defaultServer
+        /// True when Jarvis Workspace/Video/comfyui-workflow-api.json exists with a "{{prompt}}" slot.
+        var comfyWorkflowReady = false
+        var dark = DarkServer()
         /// The same files the app saves from the board settings.
         static func load(support: URL) -> Settings {
             func read(_ name: String) -> String? { try? String(contentsOf: support.appendingPathComponent(name), encoding: .utf8) }
@@ -30,6 +34,11 @@ enum HealthCheck {
             settings.projectsModel = read("projects-model.txt").flatMap(OllamaClient.sanitize)
             settings.managerModel = read("manager-model.txt").flatMap { OperationsManager.resolve(stored: $0, advertised: []) }
             if let repo = read("cursor-repo.txt").flatMap(CursorClient.sanitizeRepo) { settings.cursorRepo = repo }
+            if let host = read("ollama-host.txt").flatMap(OllamaClient.sanitizeHost) { OllamaClient.base = host }
+            if let server = read("comfy-url.txt").flatMap(OllamaClient.sanitizeHost) { settings.comfyServer = server }
+            settings.dark = DarkServer.load(support: support)
+            let workflow = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Jarvis Workspace/Video/comfyui-workflow-api.json")
+            settings.comfyWorkflowReady = (try? Data(contentsOf: workflow)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }.map(VideoPlan.hasPromptSlot) ?? false
             return settings
         }
     }
@@ -54,8 +63,9 @@ enum HealthCheck {
     }
     /// One spoken sentence at launch naming what is not working, or nil when every connection answered.
     static func startupLine(_ results: [HealthResult]) -> String? {
-        let down = results.filter { $0.status == "failed" || $0.status == "off" }.map { result -> String in
+        let down = results.filter { ($0.status == "failed" || $0.status == "off") && $0.id != "video" }.map { result -> String in
             let name = result.name.replacingOccurrences(of: " \\(.*\\)", with: "", options: .regularExpression)
+            guard result.id != "video" else { return "the 4090 can't render video yet" }
             return result.status == "off" ? "\(name) isn't connected" : "\(name) isn't answering"
         }
         guard !down.isEmpty else { return nil }
@@ -135,6 +145,26 @@ enum HealthCheck {
                 finish(HealthResult(id: "cursor", name: "Cursor (Creative)", status: status == 200 ? "ok" : "failed", detail: status == 200 ? "key accepted · repo " + settings.cursorRepo.replacingOccurrences(of: "https://", with: "") + " · no agent launched" : failure(status, data), ms: ms))
             }
         } else { finish(HealthResult(id: "cursor", name: "Cursor (Creative)", status: "off", detail: "no Cursor key in Keychain", ms: 0)) }
+
+        // Video: the 4090's ComfyUI is checked for reachability only; rendering a test clip would take minutes.
+        ComfyVideo.reachable(settings.comfyServer) { up in
+            let grokNote = GrokCredential.read() == nil ? "" : "; Grok Imagine renders meanwhile"
+            if up && settings.comfyWorkflowReady { finish(HealthResult(id: "video", name: "Video (4090 ComfyUI)", status: "ok", detail: "ComfyUI answering at \(settings.comfyServer) · workflow ready", ms: 0)) }
+            else if up { finish(HealthResult(id: "video", name: "Video (4090 ComfyUI)", status: "configured", detail: "ComfyUI answering, but no workflow saved in Jarvis Workspace/Video" + grokNote, ms: 0)) }
+            else { finish(HealthResult(id: "video", name: "Video (4090 ComfyUI)", status: "off", detail: "ComfyUI not reachable at \(settings.comfyServer)" + grokNote, ms: 0)) }
+        }
+
+        // DARK over SSH: proves the key works and reads the 4090's live state.
+        if !settings.dark.hasKey {
+            finish(HealthResult(id: "dark", name: "DARK (4090 over SSH)", status: "off", detail: "no SSH key yet · Settings → Connect DARK…", ms: 0))
+        } else {
+            let darkStart = Date()
+            settings.dark.run(DarkServer.gpuQuery, timeout: 20) { code, output in
+                let ms = Int(Date().timeIntervalSince(darkStart) * 1000)
+                if code == 0, let gpu = DarkServer.describeGPU(output) { finish(HealthResult(id: "dark", name: "DARK (4090 over SSH)", status: "ok", detail: settings.dark.target + " · " + gpu, ms: ms)) }
+                else { finish(HealthResult(id: "dark", name: "DARK (4090 over SSH)", status: "failed", detail: code == 0 ? "connected, but nvidia-smi gave no GPU line" : "ssh exit \(code): " + String(output.suffix(160)), ms: ms)) }
+            }
+        }
 
         // Operations: configuration only. Running the worker edits the source workspace.
         if AgentRuntime.executable == nil {

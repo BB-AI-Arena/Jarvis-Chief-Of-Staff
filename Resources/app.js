@@ -243,6 +243,7 @@ $('configureCursor').onclick=()=>native({action:'configureCursor'});
 
 $('stopTask').onclick=()=>native({action:'stopTask'});
 $('runHealth').onclick=()=>native({action:'health'});
+$('configureDark').onclick=()=>native({action:'configureDark'});
 $('conveneDebate').onclick=()=>{const topic=$('debateTopic').value.trim();if(!topic){notice('Give the board a question to debate.');return}native({action:'debate',topic})};
 $('debateTopic').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('conveneDebate').click()}};
 $('demoDebate').onclick=()=>playBoardDebate(demoDebateTurns,{agreement:true,summary:'Demo · boardroom now, debates next',demo:true});

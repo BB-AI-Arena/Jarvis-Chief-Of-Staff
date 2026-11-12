@@ -10,7 +10,7 @@ assert(HealthCheck.claudeText(Data("{\"content\":[{\"type\":\"text\",\"text\":\"
 assert(HealthCheck.claudeText(Data("{\"content\":[]}".utf8)) == nil)
 let line = HealthResult(id: "claude", name: "Claude (CTO)", status: "ok", detail: "claude-sonnet-5-5 · replied “OK”", ms: 812).line
 assert(line == "OK         Claude (CTO) · claude-sonnet-5-5 · replied “OK” · 812 ms")
-assert(HealthCheck.order == ["luna", "voice", "claude", "grok", "projects", "cursor", "operations"])
+assert(HealthCheck.order == ["luna", "voice", "claude", "grok", "projects", "cursor", "video", "dark", "operations"])
 print("PASS: health results read real replies and print one key-free line per connection")
 let dir = FileManager.default.temporaryDirectory.appendingPathComponent("jarvis-health-\(UUID().uuidString)")
 try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
