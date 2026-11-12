@@ -21,6 +21,7 @@ enum Acceptance {
         Case(prompt: "Remember that our first target customer is solo handymen.", history: "", routes: ["remember"], directors: []),
         Case(prompt: "I've been going back and forth on pricing lately.", history: "", routes: ["reply", "suggest"], directors: []),
         Case(prompt: "Create a 30 second cinematic video about Drop Assassin in HD with heavy special effects.", history: "", routes: ["assign"], directors: ["creative"]),
+        Case(prompt: "Fix your own UI so I can watch each director working when you hand off a task.", history: "", routes: ["assign", "task"], directors: ["operations"]),
         Case(prompt: "Yes, go ahead.", history: "assistant: Shall I add outlining a simple MVP for solo handymen to the task list for Projects?", routes: ["assign"], directors: [])
     ]
     /// Nil when the decision is acceptable, otherwise why it is not.

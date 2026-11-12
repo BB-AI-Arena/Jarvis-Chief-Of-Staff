@@ -30,6 +30,8 @@ struct DarkServer {
     var publicKey: String { key + ".pub" }
     var target: String { user + "@" + host }
 
+    /// The command line a director's worker uses to run something on DARK (same options as `arguments`).
+    var sshCommand: String { "ssh -i '\(key)' -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new \(target)" }
     /// ssh arguments: key only, no password prompts, no agent forwarding, short connect timeout.
     func arguments(_ command: String) -> [String] {
         ["-i", key, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=accept-new",

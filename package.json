@@ -5,7 +5,7 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "build:presence": "esbuild Frontend/presence.mjs --bundle --minify --format=iife --legal-comments=linked --outfile=Resources/vendor/presence.js",
-    "test": "node tests/check_conversation.cjs"
+    "test": "node tests/check_conversation.cjs && node tests/check_live.cjs"
   },
   "devDependencies": {
     "esbuild": "0.28.2",

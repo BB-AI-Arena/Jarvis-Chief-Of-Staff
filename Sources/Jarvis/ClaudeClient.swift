@@ -22,6 +22,7 @@ enum ClaudeClient {
     static let ctoFallback = "You are Jarvis's Chief Technology Officer. Answer the engineering request. You can read the workspace with your tools but cannot edit files or run commands. Be concise and do not invent results."
     @discardableResult
     static func review(_ prompt: String, model: String, apiKey: String, system: String = ClaudeClient.ctoFallback, completion: @escaping (String?) -> Void) -> URLSessionDataTask {
+        let meterTag = TokenMeter.tag
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 120
@@ -35,6 +36,7 @@ enum ClaudeClient {
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         let task = URLSession.shared.dataTask(with: request) { data, response, _ in
+            TokenMeter.record(meterTag, model: model, data: data)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             var text: String?
             if status == 200, let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let blocks = json["content"] as? [[String: Any]] {
@@ -64,6 +66,7 @@ enum ClaudeClient {
     static let maxToolRounds = 8
     /// Claude with tools. The tool handler runs natively and returns text. After `maxToolRounds` the tools are withdrawn so Claude must answer.
     static func converse(_ prompt: String, model: String, apiKey: String, system: String, tools: [[String: Any]], isCancelled: @escaping () -> Bool, tool: @escaping (String, [String: Any], @escaping (String) -> Void) -> Void, completion: @escaping (String?) -> Void) {
+        let meterTag = TokenMeter.tag
         var messages: [[String: Any]] = [["role": "user", "content": String(prompt.prefix(12000))]]
         func round(_ remaining: Int) {
             if isCancelled() { return }
@@ -76,6 +79,7 @@ enum ClaudeClient {
             if remaining > 0 { body["tools"] = tools }
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
             URLSession.shared.dataTask(with: request) { data, response, _ in
+                TokenMeter.record(meterTag, model: model, data: data)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 let json = status == 200 ? data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } : nil
                 DispatchQueue.main.async {
@@ -150,6 +154,7 @@ enum ClaudeClient {
     /// Claude answers with live web search. Resumes paused turns (the server's search loop has its own limit) up to 3 times.
     /// Completion gets the report, or nil plus a plain reason.
     static func research(_ prompt: String, model: String, apiKey: String, system: String, isCancelled: @escaping () -> Bool, completion: @escaping (String?, String?) -> Void) {
+        let meterTag = TokenMeter.tag
         var messages: [[String: Any]] = [["role": "user", "content": String(prompt.prefix(12000))]]
         func send(_ continuations: Int) {
             if isCancelled() { return }
@@ -161,6 +166,7 @@ enum ClaudeClient {
             if supportsFallback(model) { request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta") }
             request.httpBody = try? JSONSerialization.data(withJSONObject: searchBody(model: model, system: system, messages: messages))
             URLSession.shared.dataTask(with: request) { data, response, _ in
+                TokenMeter.record(meterTag, model: model, data: data)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
                 DispatchQueue.main.async {

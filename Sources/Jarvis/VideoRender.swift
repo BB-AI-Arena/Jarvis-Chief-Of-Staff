@@ -84,7 +84,27 @@ struct GrokVideo: ShotRenderer {
 struct ComfyVideo: ShotRenderer {
     let server: String
     let workflow: [String: Any]
+    /// ComfyUI sends live progress over its websocket to this client id (see ComfyMonitor).
+    var clientID = "jarvis"
+    /// Called on the main queue with the shot's ComfyUI prompt id once the job is queued.
+    var onQueued: ((String) -> Void)? = nil
     static let defaultServer = "http://192.168.4.31:8188"
+    /// Removes Jarvis's waiting jobs from the queue and interrupts the running one only if it is Jarvis's.
+    static func cancel(server: String, promptIDs: [String]) {
+        guard !promptIDs.isEmpty, let queueURL = URL(string: server + "/queue") else { return }
+        func post(_ path: String, _ body: [String: Any]) {
+            var request = URLRequest(url: URL(string: server + path)!)
+            request.httpMethod = "POST"; request.timeoutInterval = 10
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            URLSession.shared.dataTask(with: request).resume()
+        }
+        post("/queue", ["delete": promptIDs])
+        URLSession.shared.dataTask(with: queueURL) { data, _, _ in
+            let running = ((data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })?["queue_running"] as? [[Any]]) ?? []
+            if running.contains(where: { $0.count > 1 && promptIDs.contains(($0[1] as? String) ?? "") }) { post("/interrupt", [:]) }
+        }.resume()
+    }
     static func reachable(_ server: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: server + "/system_stats") else { completion(false); return }
         var request = URLRequest(url: url)
@@ -100,7 +120,7 @@ struct ComfyVideo: ShotRenderer {
         request.httpMethod = "POST"
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["prompt": filled, "client_id": "jarvis"])
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["prompt": filled, "client_id": clientID])
         URLSession.shared.dataTask(with: request) { data, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
@@ -109,6 +129,7 @@ struct ComfyVideo: ShotRenderer {
                 onMain { completion(nil, "ComfyUI did not accept the workflow (HTTP \(status))" + (message.isEmpty ? "" : ": " + String(message.prefix(160)))) }
                 return
             }
+            if let onQueued = self.onQueued { onMain { onQueued(id) } }
             self.wait(id, file: file, started: Date(), isCancelled: isCancelled, completion: completion)
         }.resume()
     }
@@ -135,8 +156,68 @@ struct ComfyVideo: ShotRenderer {
     }
 }
 
+/// Listens to ComfyUI's websocket (/ws?clientId=…) for the live events it sends about Jarvis's jobs:
+/// execution_start, executing (which node; nil node = finished), progress (sampler step of max). Reconnects until stopped.
+final class ComfyMonitor {
+    struct Event: Equatable { let type: String; let promptID: String; let node: String?; let value: Int?; let max: Int? }
+    let server: String, clientID: String
+    var onEvent: (Event) -> Void = { _ in }
+    private var socket: URLSessionWebSocketTask?
+    private var stopped = false
+    init(server: String, clientID: String) { self.server = server; self.clientID = clientID }
+    func start() {
+        guard !stopped, var parts = URLComponents(string: server + "/ws") else { return }
+        parts.scheme = parts.scheme == "https" ? "wss" : "ws"
+        parts.queryItems = [URLQueryItem(name: "clientId", value: clientID)]
+        guard let url = parts.url else { return }
+        socket = URLSession.shared.webSocketTask(with: url)
+        socket?.maximumMessageSize = 8 << 20
+        socket?.resume()
+        receive()
+    }
+    func stop() { stopped = true; socket?.cancel(with: .normalClosure, reason: nil); socket = nil }
+    private func receive() {
+        socket?.receive { [weak self] result in
+            guard let self, !self.stopped else { return }
+            switch result {
+            case .success(.string(let text)):
+                if let event = ComfyMonitor.parse(text) { onMain { if !self.stopped { self.onEvent(event) } } }
+                self.receive()
+            case .success: self.receive()   // binary preview frames
+            case .failure: DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.start() }
+            }
+        }
+    }
+    static func parse(_ text: String) -> Event? {
+        guard let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], let type = json["type"] as? String,
+              ["execution_start", "executing", "progress", "execution_error", "execution_success"].contains(type),
+              let data = json["data"] as? [String: Any], let prompt = data["prompt_id"] as? String else { return nil }
+        let node = (data["node"] as? String) ?? (data["node"] as? Int).map(String.init)
+        return Event(type: type, promptID: prompt, node: node, value: data["value"] as? Int, max: data["max"] as? Int)
+    }
+}
+
 /// Joins the shots into one .mp4 with AVFoundation (no ffmpeg needed). Keeps each clip's sound when it has any.
 enum VideoStitcher {
+    /// A small JPEG (data URL) from the middle of a clip, for the Studio card.
+    static func thumbnail(_ clip: URL, completion: @escaping (String?) -> Void) {
+        Task {
+            let asset = AVURLAsset(url: clip)
+            let seconds = (try? await asset.load(.duration)).map(CMTimeGetSeconds) ?? 0
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 320, height: 320)
+            var url: String?
+            if let (image, _) = try? await generator.image(at: CMTime(seconds: max(seconds / 2, 0), preferredTimescale: 600)) {
+                let data = NSMutableData()
+                if let dest = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) {
+                    CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 0.7] as CFDictionary)
+                    if CGImageDestinationFinalize(dest) { url = "data:image/jpeg;base64," + (data as Data).base64EncodedString() }
+                }
+            }
+            onMain { completion(url) }
+        }
+    }
     static func join(_ clips: [URL], to output: URL, completion: @escaping (Bool) -> Void) {
         Task {
             let ok = await join(clips, to: output)

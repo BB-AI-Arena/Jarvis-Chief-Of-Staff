@@ -33,6 +33,7 @@ enum JarvisRouter {
     }
     @discardableResult
     static func route(_ prompt: String, history: String, apiKey: String, persona: String, memory: String, completion: @escaping (RouteDecision?) -> Void) -> URLSessionDataTask {
+        let meterTag = TokenMeter.tag
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 20
@@ -41,6 +42,7 @@ enum JarvisRouter {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body(prompt: prompt, history: history, system: system(persona: persona, memory: memory)))
         let task = URLSession.shared.dataTask(with: request) { data, response, _ in
+            TokenMeter.record(meterTag, model: model, data: data)
             let decision = (response as? HTTPURLResponse)?.statusCode == 200 ? data.flatMap { JarvisRouter.decision(from: $0) } : nil
             DispatchQueue.main.async { completion(decision) }
         }

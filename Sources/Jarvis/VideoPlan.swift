@@ -34,13 +34,30 @@ enum VideoPlan {
     }
     /// Requested length in seconds ("30 second", "45-sec", "1 minute"), clamped to the ceiling. Default 15.
     static func requestedSeconds(_ text: String) -> Int {
-        let lower = text.lowercased()
+        let lower = numbersAsDigits(text.lowercased())
         if let match = lower.range(of: "([0-9]{1,3})\\s*-?\\s*(seconds?|secs?|s\\b)", options: .regularExpression),
            let number = Int(lower[match].prefix { $0.isNumber }) { return min(max(number, 3), maxTotalSeconds) }
         if let match = lower.range(of: "([0-9])\\s*-?\\s*minutes?", options: .regularExpression),
            let number = Int(lower[match].prefix { $0.isNumber }) { return min(number * 60, maxTotalSeconds) }
         if lower.contains("a minute") || lower.contains("one minute") { return maxTotalSeconds }
         return 15
+    }
+    /// "thirty-second" → "30-second", "forty five seconds" → "45 seconds". Voice transcripts spell numbers out.
+    static func numbersAsDigits(_ lower: String) -> String {
+        let ones = ["one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9]
+        let teens = ["ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19]
+        let tens = ["twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90]
+        var text = lower
+        let pattern = "\\b(" + tens.keys.joined(separator: "|") + ")(?:[\\s-](" + ones.keys.joined(separator: "|") + "))?\\b"
+        while let range = text.range(of: pattern, options: .regularExpression) {
+            let parts = text[range].split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
+            let value = (tens[parts[0]] ?? 0) + (parts.count > 1 ? ones[parts[1]] ?? 0 : 0)
+            text.replaceSubrange(range, with: String(value))
+        }
+        for (word, value) in teens.merging(ones, uniquingKeysWith: { a, _ in a }) {
+            text = text.replacingOccurrences(of: "\\b\(word)\\b", with: String(value), options: .regularExpression)
+        }
+        return text
     }
     static func plannerSystem(persona: String) -> String {
         persona + "\n\nYou are planning a video for Jarvis's video renderer. Write a shot list. Return only JSON: {\"title\": \"...\", \"shots\": [{\"prompt\": \"...\", \"seconds\": 5}, ...]}. Each prompt is a complete, self-contained description for a text-to-video model: subject, action, setting, camera move and lens, lighting, color grade, mood and visual effects, written as one paragraph. Repeat the same detailed description of any recurring character or product in every shot, because each shot is rendered separately. Do not put on-screen text in any shot except a final title card if asked. Do not add facts about the subject that the brief does not give."
@@ -90,6 +107,108 @@ enum VideoPlan {
             lines.append("   " + shot.prompt)
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    // MARK: Live progress (what the Studio card on the task list shows)
+    /// One video job's progress as the page shows it. Only real events change it: renderer choice, the plan, ComfyUI's
+    /// own execution and step messages, finished downloads and the join. Nothing is estimated except the bar between steps.
+    struct Progress {
+        enum Stage: String { case choosing, planning, rendering, joining, finished, failed }
+        struct ShotState {
+            var prompt: String
+            var seconds: Int
+            var state = "queued"          // queued, rendering, downloading, done, failed
+            var activity = ""             // "loading models", "diffusing", …
+            var step = 0, steps = 0
+            var started: Date?, ended: Date?
+            var thumb: String?            // small JPEG data URL of the finished clip
+            var note = ""
+        }
+        let taskID: String
+        var title = "Video"
+        var renderer = ""
+        var stage = Stage.choosing
+        var note = ""
+        var gpu = ""
+        var started = Date()
+        var ended: Date?
+        var shots: [ShotState] = []
+
+        mutating func load(_ plan: Plan) {
+            title = plan.title
+            shots = plan.shots.map { ShotState(prompt: $0.prompt, seconds: $0.seconds) }
+            stage = .rendering
+        }
+        var headline: String {
+            switch stage {
+            case .choosing: return "Choosing where to render"
+            case .planning: return "Writing the shot list" + (renderer.isEmpty ? "" : " for " + renderer)
+            case .rendering:
+                let done = shots.filter { $0.state == "done" }.count
+                if let index = shots.firstIndex(where: { $0.state == "rendering" || $0.state == "downloading" }) {
+                    let shot = shots[index]
+                    let detail = shot.state == "downloading" ? "downloading" : shot.activity + (shot.activity == "diffusing" && shot.steps > 0 ? " \(shot.step)/\(shot.steps)" : "")
+                    return "Rendering shot \(index + 1) of \(shots.count)" + (detail.isEmpty ? "" : " · " + detail)
+                }
+                return "Rendered \(done) of \(shots.count) shots"
+            case .joining: return "Joining \(shots.filter { $0.state == "done" }.count) shots into one video"
+            case .finished: return "Finished: " + title
+            case .failed: return "Stopped" + (note.isEmpty ? "" : ": " + note)
+            }
+        }
+        /// 0–100 for one shot: ComfyUI's real step count while diffusing; fixed points for the other phases.
+        static func percent(_ shot: ShotState) -> Int {
+            switch shot.state {
+            case "done": return 100
+            case "downloading": return 97
+            case "rendering":
+                switch shot.activity {
+                case "loading models": return 4
+                case "reading the prompt": return 8
+                case "diffusing": return shot.steps > 0 ? 10 + Int(70.0 * Double(shot.step) / Double(shot.steps)) : 10
+                case "decoding frames": return 84
+                case "making sound": return 90
+                case "encoding video": return 94
+                default: return 6
+                }
+            default: return 0
+            }
+        }
+        /// 0–100 for the whole job.
+        var percent: Int {
+            switch stage {
+            case .choosing: return 1
+            case .planning: return 3
+            case .rendering:
+                guard !shots.isEmpty else { return 5 }
+                let total = shots.reduce(0) { $0 + Progress.percent($1) * max($1.seconds, 1) }
+                return 5 + Int(Double(total) / Double(shots.reduce(0) { $0 + max($1.seconds, 1) }) * 0.9)
+            case .joining: return 97
+            case .finished: return 100
+            case .failed: return 100
+            }
+        }
+        func payload() -> [String: Any] {
+            let ms: (Date?) -> Any = { $0.map { Int($0.timeIntervalSince1970 * 1000) } ?? NSNull() }
+            return ["taskID": taskID, "title": title, "renderer": renderer, "stage": stage.rawValue, "headline": headline, "note": note,
+                    "gpu": gpu, "percent": percent, "startedMs": ms(started), "endedMs": ms(ended),
+                    "shots": shots.enumerated().map { index, shot in
+                        ["n": index + 1, "seconds": shot.seconds, "prompt": String(shot.prompt.prefix(400)), "state": shot.state, "activity": shot.activity,
+                         "step": shot.step, "steps": shot.steps, "percent": Progress.percent(shot), "startedMs": ms(shot.started), "endedMs": ms(shot.ended),
+                         "thumb": shot.thumb ?? NSNull(), "note": shot.note] as [String: Any]
+                    }]
+        }
+        /// Plain words for the ComfyUI node that is running.
+        static func activity(_ classType: String) -> String {
+            let name = classType.lowercased()
+            if name.contains("loader") { return "loading models" }
+            if name.contains("textencode") || name.contains("conditioning") { return "reading the prompt" }
+            if name.contains("sampler") && !name.contains("select") { return "diffusing" }
+            if name.contains("audio") && name.contains("decode") { return "making sound" }
+            if name.contains("vaedecode") || name.contains("decode") { return "decoding frames" }
+            if name.contains("savevideo") || name.contains("createvideo") || name.contains("videocombine") { return "encoding video" }
+            return ""
+        }
     }
 
     // MARK: ComfyUI workflow (the 4090)

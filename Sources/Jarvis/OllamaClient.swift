@@ -42,12 +42,14 @@ enum OllamaClient {
     }
     @discardableResult
     static func chat(_ prompt: String, model: String, system: String, host: String = base, completion: @escaping (String?) -> Void) -> URLSessionDataTask {
+        let meterTag = TokenMeter.tag
         var request = URLRequest(url: URL(string: host + "/api/chat")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 240
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody(prompt, model: model, system: system))
         let task = URLSession.shared.dataTask(with: request) { data, response, _ in
+            TokenMeter.record(meterTag, model: model, data: data)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let text = status == 200 ? data.flatMap { OllamaClient.text(from: $0) } : nil
             DispatchQueue.main.async { completion(text) }

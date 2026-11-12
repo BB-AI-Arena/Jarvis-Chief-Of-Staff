@@ -68,11 +68,12 @@ function renderVoices(){
   const close=document.createElement('button');close.type='button';close.className='close';close.textContent='Close';close.onclick=()=>el.classList.remove('open');controls.append(close);
   controls.querySelector('select').onchange=e=>{voices[seat.key]=e.target.value;storage.set('voices',voices)};
   controls.querySelector('.preview').onclick=()=>native({action:'speak',text:seat.key==='Jarvis'?'Good evening. Everything is in hand. Shall we turn that rather ambitious idea into a plan?':`Hello. I speak for the ${seat.title}.`,voice:voices[seat.key]});
-  const toggle=()=>{const was=el.classList.contains('open');root.querySelectorAll('.seat.open').forEach(s=>s.classList.remove('open'));el.classList.toggle('open',!was)};
+  const toggle=()=>{const was=el.classList.contains('open');root.querySelectorAll('.seat.open').forEach(s=>s.classList.remove('open'));el.classList.toggle('open',!was);window.JarvisLive?.paint()};
   el.querySelector('.figure').onclick=toggle;el.querySelector('.plate').onclick=toggle;
   el.querySelector('.figure').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}};
   root.append(el);
  }
+ window.JarvisLive?.paint();
 }
 // Debate playback: animates turns it is given. It does not generate or claim model output.
 let debateToken=0;
@@ -154,18 +155,18 @@ function renderBoardTasks(tasks){
  const panel=$('boardTasks');if(!panel)return;
  const active=tasks.filter(t=>t.state==='running'||t.state==='proposed').slice(0,6);
  const recent=tasks.filter(t=>t.state!=='running'&&t.state!=='proposed').slice(0,4);
- const row=t=>`<article class="task-row ${escape(t.state)}"><div><strong>${escape(t.title)}</strong><small><span class="chip ${escape(t.state)}">${escape(taskState(t))}</span>${escape(ownerLabel(t.owner))}${t.parentID?' · subtask':''}${t.verified?' · ✓ verified':''}</small></div>${taskActions(t)}</article>`;
+ const row=t=>`<article class="task-row ${escape(t.state)}"><div><strong>${escape(t.title)}</strong><small><span class="chip ${escape(t.state)}">${escape(taskState(t))}</span>${escape(ownerLabel(t.owner))}${t.parentID?' · subtask':''}${t.verified?' · ✓ verified':''}</small></div>${taskActions(t)}</article>${window.JarvisLive?window.JarvisLive.studio(t.id,true):''}`;
  panel.innerHTML=`<div class="panel-heading"><span>TASK LIST</span><span>${active.length} active</span></div>${suggestionRows()}${active.length||recent.length?active.map(row).join('')+recent.map(row).join(''):(suggestions.length?'':'<p>No tasks yet. Ask Jarvis for something and it lands here.</p>')}`;wireSuggestions(panel);
  wireTaskActions(panel);
 }
 function renderTasks(tasks){
- lastTasks=tasks;renderBoardTasks(tasks);
+ lastTasks=tasks;renderBoardTasks(tasks);window.JarvisLive?.tasks(tasks);
  const panel=$('taskPanel');
  if(!tasks.length&&!suggestions.length){panel.hidden=true;panel.replaceChildren();return}
  panel.hidden=false;
  const active=tasks.filter(task=>task.state==='running'||task.state==='proposed');
  const recent=tasks.filter(task=>task.state!=='running'&&task.state!=='proposed').slice(0,8);
- const row=task=>`<article class="task-row ${task.state}"><div><strong>${escape(task.title)}</strong><small>${escape(ownerLabel(task.owner))} · ${escape(taskState(task))}${task.parentID?' · subtask':''}${task.verified?' · verified':''}${task.resultSummary?' · '+escape(task.resultSummary):''}</small></div>${taskActions(task)}</article>`;
+ const row=task=>`<article class="task-row ${task.state}"><div><strong>${escape(task.title)}</strong><small>${escape(ownerLabel(task.owner))} · ${escape(taskState(task))}${task.parentID?' · subtask':''}${task.verified?' · verified':''}${task.resultSummary?' · '+escape(task.resultSummary):''}</small></div>${taskActions(task)}</article>${window.JarvisLive?window.JarvisLive.studio(task.id,false):''}`;
  panel.innerHTML=`<div class="panel-heading">TASKS</div>${suggestions.length?`<div class="task-group"><h3>Suggested</h3>${suggestionRows()}</div>`:''}<div class="task-group"><h3>Active</h3>${active.length?active.map(row).join(''):'<p>No active tasks.</p>'}</div><div class="task-group"><h3>Recent</h3>${recent.length?recent.map(row).join(''):'<p>No recent tasks.</p>'}</div>`;
  wireTaskActions(panel);
  wireSuggestions(panel);
@@ -175,6 +176,7 @@ function newProject(){const modal=document.createElement('div');modal.className=
 window.receive=({event,data})=>{
  if(window.JARVIS_MODE==='orb'&&['taskStarted','taskResult'].includes(event)){taskActive=event==='taskStarted';return;}
  if(window.JARVIS_MODE==='orb'&&!['state','conversation','ready','audioLevel','mouthCues','audioTime'].includes(event))return;
+ if(window.JarvisLive&&window.JarvisLive.receive(event,data))return;
  switch(event){
  case'taskStarted':taskActive=true;$('stopTask').hidden=false;notice('A background worker is working on Jarvis. You can keep talking.');break;
  case'taskUpdate':renderTasks(data||[]);break;

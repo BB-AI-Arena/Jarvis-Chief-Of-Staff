@@ -51,9 +51,10 @@ struct RouteDecision {
         return topic.isEmpty ? nil : topic
     }
     static let videoRule = "Video: any request to make a video, trailer, promo, animation or clip goes to route=assign with director creative; keep the requested length, quality and style in the task text. The Creative Director plans the shots and renders them."
+    static let selfRule = "Jarvis's own app: you can improve yourself by delegating. Any request to fix, change or add to Jarvis himself (his screens, UI, board, animations, settings, features or bugs) goes to route=assign with director operations; the Operations worker edits and builds the Jarvis source. Put the user's request in the task text with the result they want to see. Never say you cannot change your own app."
     static let rememberRule = "Memory: when the user asks you to remember, note or keep in mind a fact, preference or decision, use route=remember with the fact as one plain sentence in task and a short spoken confirmation in text."
     /// The routing rules shared by every Jarvis brain (Claude router, Luna, local).
-    static let routerRules = "Return JSON with route, text and optional director. You never execute work yourself. Use route=reply for discussion, with your spoken reply in text. Use route=astra only for substantial reasoning or when the user explicitly asks Astra to reason; text must contain the precise reasoning request. Use route=task ONLY when the user explicitly asks for a concrete action on Jarvis's own source (director operations). Use route=assign for any other concrete request; text must contain the complete task. Set director to operations for workspace work or running jobs on this Mac, technology for engineering, research for facts and markets, creative for look, naming and copy, or projects for plans and scope. Merely discussing possible features is not a task. Task list: when the user asks you to do, make, find, fix, build, design, research or plan something concrete, use route=assign with the complete task in text and the best director; the app records it on the task list and tells the user, so do not claim it yourself. In normal conversation you may suggest one useful task: use route=suggest, put a short spoken suggestion that asks for approval in text (for example: Shall I add drafting the launch plan to the task list for Projects?), the task itself in task, and the director. Nothing is added until the user approves. If the user approves a task you suggested earlier, use route=assign with that task. Never say a task was added unless the app confirmed it.  " + debateRule + " " + rememberRule + " " + videoRule
+    static let routerRules = "Return JSON with route, text and optional director. You never execute work yourself. Use route=reply for discussion, with your spoken reply in text. Use route=astra only for substantial reasoning or when the user explicitly asks Astra to reason; text must contain the precise reasoning request. Use route=task ONLY when the user explicitly asks for a concrete action on Jarvis's own source (director operations). Use route=assign for any other concrete request; text must contain the complete task. Set director to operations for workspace work or running jobs on this Mac, technology for engineering, research for facts and markets, creative for look, naming and copy, or projects for plans and scope. Merely discussing possible features is not a task. Task list: when the user asks you to do, make, find, fix, build, design, research or plan something concrete, use route=assign with the complete task in text and the best director; the app records it on the task list and tells the user, so do not claim it yourself. In normal conversation you may suggest one useful task: use route=suggest, put a short spoken suggestion that asks for approval in text (for example: Shall I add drafting the launch plan to the task list for Projects?), the task itself in task, and the director. Nothing is added until the user approves. If the user approves a task you suggested earlier, use route=assign with that task. Never say a task was added unless the app confirmed it.  " + debateRule + " " + rememberRule + " " + videoRule + " " + selfRule
     /// Shared routing rule for every Jarvis brain: the board debates on request; Jarvis never invents its answer.
     static let debateRule = "Board debate: when the user asks the board or the directors to debate, discuss, argue out or weigh in on a question, use route=debate with the question in task and a short spoken acknowledgement in text. The app runs a live debate and reports the verdict; never invent what the board thinks."
     /// Work is an assignment to a director. Jarvis is not a director and never executes it.
@@ -63,6 +64,12 @@ struct RouteDecision {
         guard directors.contains(director) else { return nil }
         return (director, decision.text)
     }
+    /// True when a director's result says it was blocked or could not do the work. No follow-up is offered then:
+    /// suggesting "try again" or "diagnose why" loops on the same wall.
+    static func looksBlocked(_ result: String) -> Bool {
+        let lower = result.prefix(1500).lowercased()
+        return ["could not", "couldn't", "cannot ", "can't ", "unable to", "was denied", "denied the", "permission denied", "operation not permitted", "is blocked", "blocked before", "not permitted", "no access", "failed to"].contains { lower.contains($0) }
+    }
     /// A suggestion Brandon has not approved yet. It is shown for approval and never recorded as a task.
     static func suggestion(for decision: RouteDecision) -> (director: String, title: String)? {
         guard decision.route == "suggest", let task = decision.task, !task.isEmpty else { return nil }
@@ -71,6 +78,8 @@ struct RouteDecision {
     static func classify(_ text: String, hinted: String?) -> String {
         if let hinted, directors.contains(hinted) { return hinted }
         let lower = text.lowercased()
+        let selfWords = ["your ui", "your own ui", "your interface", "your screen", "your app", "your own app", "yourself", "jarvis app", "jarvis's ui", "jarvis ui", "your board", "your settings"]
+        if selfWords.contains(where: { lower.contains($0) }) { return "operations" }
         if lower.contains("grok") || lower.contains("research") { return "research" }
         if lower.contains("design") || lower.contains("creative") || lower.contains("visual") || lower.contains("video") || lower.contains("trailer") || lower.contains("animation") { return "creative" }
         if lower.contains("project plan") || lower.contains("roadmap") || lower.contains("planning") { return "projects" }

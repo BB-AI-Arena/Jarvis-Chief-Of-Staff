@@ -52,6 +52,7 @@ enum GrokClient {
     }
     /// Research with live web search. If xAI refuses the search call, falls back to the plain model and says so.
     static func researchLive(_ prompt: String, model: String, apiKey: String, system: String, isCancelled: @escaping () -> Bool, completion: @escaping (String?, Bool) -> Void) {
+        let meterTag = TokenMeter.tag
         var request = URLRequest(url: URL(string: "https://api.x.ai/v1/responses")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 240
@@ -59,17 +60,19 @@ enum GrokClient {
         authorize(&request, apiKey)
         request.httpBody = try? JSONSerialization.data(withJSONObject: searchBody(prompt, model: model, system: system))
         URLSession.shared.dataTask(with: request) { data, response, _ in
+            TokenMeter.record(meterTag, model: model, data: data)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let text = status == 200 ? data.flatMap { GrokClient.searchText(from: $0) } : nil
             DispatchQueue.main.async {
                 if isCancelled() { return }
                 if let text { completion(text, true); return }
-                research(prompt, model: model, apiKey: apiKey, system: system + "\n\nLive web search was not available on this call, so say when your information may be out of date.") { completion($0, false) }
+                TokenMeter.charge(meterTag ?? "jarvis") { research(prompt, model: model, apiKey: apiKey, system: system + "\n\nLive web search was not available on this call, so say when your information may be out of date.") { completion($0, false) } }
             }
         }.resume()
     }
     @discardableResult
     static func research(_ prompt: String, model: String, apiKey: String, system: String = GrokClient.researchFallback, completion: @escaping (String?) -> Void) -> URLSessionDataTask {
+        let meterTag = TokenMeter.tag
         var request = URLRequest(url: URL(string: "https://api.x.ai/v1/chat/completions")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 180
@@ -77,6 +80,7 @@ enum GrokClient {
         authorize(&request, apiKey)
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody(prompt, model: model, system: system))
         let task = URLSession.shared.dataTask(with: request) { data, response, _ in
+            TokenMeter.record(meterTag, model: model, data: data)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let text = status == 200 ? data.flatMap { GrokClient.text(from: $0) } : nil
             DispatchQueue.main.async { completion(text) }
