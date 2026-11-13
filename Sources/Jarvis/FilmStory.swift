@@ -12,6 +12,7 @@ struct FilmStory: Codable {
     var research = ""
     var script = ""
     var feedback = ""
+    var ownerRevisionFeedback: String? = nil
     var hash = ""
     var viewedHash = ""
     var approvedHash = ""

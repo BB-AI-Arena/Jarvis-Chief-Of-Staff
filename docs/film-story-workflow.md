@@ -33,3 +33,5 @@ This queues a version-bound writing request; it does not unlock the Mac or autho
 The workflow regression checks old approval preservation, once-only dispatch, full feedback delivery and stale request rejection.
 
 Failed Creative writing requests can be retried from needs-attention when the current saved consultation task is a failed Creative task. A failed Research review cannot use this entry to send the old screenplay forward. Consultation failure also terminalizes the aggregate story task. Sonnet 5.5 screenplay requests use its documented `between_tools` thinking mode with no tools, leaving output for the deliverable; ordinary clients retain their existing defaults. Provider limit diagnostics report block types and text length without persisting reasoning contents.
+
+Latest owner revision direction is stored separately from the evolving Research feedback. Every later writer/reviewer/confirmation handoff includes it verbatim alongside the baseline brief and source evidence. Tests ensure a reviewer report cannot erase the owner's new direction.

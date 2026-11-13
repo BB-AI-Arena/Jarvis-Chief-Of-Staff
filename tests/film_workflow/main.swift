@@ -72,6 +72,7 @@ try! JSONEncoder().encode(request).write(to:requestFile)
 app.consumeStoryRevisionRequests()
 let revision = app.loadFilmStory()!
 assert(revision.phase == "draft" && revision.approvedHash.isEmpty && revision.approvedAt.isEmpty)
+assert(revision.ownerRevisionFeedback == request.feedback)
 assert(revision.script == rejected.script && revision.brief == rejected.brief)
 assert(revision.history.contains(where:{$0.contains("Historical production approval:")}))
 assert(app.ledger.rows.first(where:{$0.id==revision.taskID})!.instructions.contains(request.feedback))
@@ -108,3 +109,17 @@ app.refreshFilmStory()
 assert(app.loadFilmStory()!.phase == "needs_attention")
 assert(app.ledger.rows.first(where:{$0.id == terminalStory.id})?.state == "failed")
 print("PASS: failed consultation terminalizes aggregate story status")
+
+// Reviewer feedback must not overwrite the latest owner direction between stages.
+var contextStory = app.loadFilmStory()!
+contextStory.phase = "draft"
+contextStory.ownerRevisionFeedback = "CURRENT OWNER: coherent story, real app screens, immediate hook"
+app.saveFilmStory(contextStory)
+app.deliver("RUNTIME_SECONDS: 90\nFull revised screenplay\nEND")
+let reviewTask = app.ledger.rows.first(where:{$0.id == app.loadFilmStory()!.taskID})!
+assert(reviewTask.instructions.contains(contextStory.ownerRevisionFeedback!))
+app.deliver(review("revise",["Fix scene motivation"]))
+let writingTask = app.ledger.rows.first(where:{$0.id == app.loadFilmStory()!.taskID})!
+assert(writingTask.instructions.contains(contextStory.ownerRevisionFeedback!))
+assert(app.loadFilmStory()!.ownerRevisionFeedback == contextStory.ownerRevisionFeedback)
+print("PASS: latest owner revision direction survives Research and Creative handoffs")
