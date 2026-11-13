@@ -71,12 +71,12 @@ final class PageProtocol: URLProtocol {
     override func stopLoading() {}
 }
 URLProtocol.registerClass(PageProtocol.self)
-func exercisePages(forever: Bool) -> String? {
+func exercisePages(forever: Bool, writingOnlyThinking: Bool = false) -> String? {
     SpendBudget.directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: SpendBudget.directory) }
     PageProtocol.limitedForever = forever;PageProtocol.bodies = []
     var finished = false;var answer: String?
-    ClaudeClient.converse("Complete this assignment",model:"claude-sonnet-5-5",apiKey:"not-a-real-key",system:"S",tools:[],isCancelled:{false},tool:{_,_,done in done("unused")},diagnostic:{PageProtocol.lastDiagnostic = $0}) { text in answer = text;finished = true }
+    ClaudeClient.converse("Complete this assignment",model:"claude-sonnet-5-5",apiKey:"not-a-real-key",system:"S",tools:[],isCancelled:{false},tool:{_,_,done in done("unused")},diagnostic:{PageProtocol.lastDiagnostic = $0},writingOnlyThinking:writingOnlyThinking) { text in answer = text;finished = true }
     let deadline = Date().addingTimeInterval(5)
     while !finished && Date() < deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.01)) }
     assert(finished,"continuation test did not complete")
@@ -84,6 +84,7 @@ func exercisePages(forever: Bool) -> String? {
 }
 assert(exercisePages(forever:false) == "First page\nFinal page")
 assert(PageProtocol.bodies.count == 2)
+assert(PageProtocol.bodies.allSatisfy { $0["thinking"] == nil })
 let continuationMessages = PageProtocol.bodies[1]["messages"] as! [[String:Any]]
 assert(continuationMessages.count == 3)
 assert(continuationMessages.last?["content"] as? String == ClaudeClient.continueAnswer)
@@ -95,5 +96,7 @@ assert(PageProtocol.lastDiagnostic.contains("HTTP 429"))
 assert(PageProtocol.lastDiagnostic.contains("Rate limit reached"))
 assert(!PageProtocol.lastDiagnostic.contains("not-a-real-key"))
 PageProtocol.errorResponse = false
+assert(exercisePages(forever:false,writingOnlyThinking:true) == "First page\nFinal page")
+assert(PageProtocol.bodies.allSatisfy { ($0["thinking"] as? [String:String])?["type"] == "between_tools" })
 URLProtocol.unregisterClass(PageProtocol.self)
 print("PASS: real client continues a limited response, retains its prior context, and refuses exhausted partial output")

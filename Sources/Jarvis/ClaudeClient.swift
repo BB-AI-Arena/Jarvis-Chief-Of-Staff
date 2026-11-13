@@ -80,7 +80,7 @@ enum ClaudeClient {
     static let continueAnswer = "Your answer reached its response limit. Continue exactly where it ended; do not repeat earlier text or omit unfinished requirements. Return only the remaining numbered sections. If this is the final part, finish the deliverable completely."
     static let maxToolRounds = 8
     /// Claude with tools. The tool handler runs natively and returns text. After `maxToolRounds` the tools are withdrawn so Claude must answer.
-    static func converse(_ prompt: String, model: String, apiKey: String, system: String, images: [[String: Any]] = [], tools: [[String: Any]], isCancelled: @escaping () -> Bool, tool: @escaping (String, [String: Any], @escaping (String) -> Void) -> Void, diagnostic: ((String) -> Void)? = nil, maxTokens: Int = 4000, completion: @escaping (String?) -> Void) {
+    static func converse(_ prompt: String, model: String, apiKey: String, system: String, images: [[String: Any]] = [], tools: [[String: Any]], isCancelled: @escaping () -> Bool, tool: @escaping (String, [String: Any], @escaping (String) -> Void) -> Void, diagnostic: ((String) -> Void)? = nil, maxTokens: Int = 4000, writingOnlyThinking: Bool = false, completion: @escaping (String?) -> Void) {
         let meterTag = TokenMeter.tag
         var pages = AnswerPages()
         var messages: [[String: Any]] = [["role": "user", "content": [["type": "text", "text": PromptDelivery.envelope(prompt)]] + images]]
@@ -93,6 +93,7 @@ enum ClaudeClient {
             authorize(&request, apiKey)
             if supportsFallback(model) { request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta") }
             var body: [String: Any] = ["model": model, "max_tokens": maxTokens, "system": system, "messages": messages]
+            if writingOnlyThinking { body["thinking"] = ["type": model == "claude-sonnet-5-5" ? "between_tools" : "disabled"] }
             if remaining > 0 { body["tools"] = tools }
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
             BudgetHTTP.dataTask(with: request, seat: meterTag) { data, response, error in
@@ -108,7 +109,7 @@ enum ClaudeClient {
                         completion(nil);return
                     }
                     if json["stop_reason"] as? String == "max_tokens" {
-                        guard toolUses(blocks).isEmpty, pages.append(searchReport(blocks),limited:true) == .more else { diagnostic?("Claude reached its response continuation limit or returned an incomplete tool request; no final result was accepted.");completion(nil);return }
+                        guard toolUses(blocks).isEmpty, pages.append(searchReport(blocks),limited:true) == .more else { diagnostic?("Claude response limit: blocks=" + blocks.compactMap { $0["type"] as? String }.joined(separator:",") + ", textCharacters=" + String(searchReport(blocks)?.count ?? 0) + ", toolCalls=" + String(toolUses(blocks).count) + ". No complete result was accepted.");completion(nil);return }
                         messages.append(["role":"assistant","content":blocks])
                         messages.append(["role":"user","content":continueAnswer])
                         round(remaining);return

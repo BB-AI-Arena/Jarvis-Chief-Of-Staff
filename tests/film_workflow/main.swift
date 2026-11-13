@@ -86,3 +86,25 @@ try! JSONEncoder().encode(stale).write(to:inbox.appendingPathComponent(stale.id 
 app.consumeStoryRevisionRequests()
 assert(app.dispatched.count == countAfterRevision && app.loadFilmStory()!.taskID == revision.taskID)
 print("PASS: local revision inbox archives historical approval, dispatches actual Creative once, rejects stale requests and never starts production")
+
+var failedDraft = app.loadFilmStory()!
+failedDraft.phase = "needs_attention"
+app.saveFilmStory(failedDraft)
+app.updateTask(failedDraft.taskID,state:"failed",summary:"No completed screenplay")
+assert(app.canReviseFilmStory(failedDraft))
+app.reviseFilmStory(failedDraft.id,feedback:"Retry the same complete rewrite after fixing delivery.")
+assert(app.loadFilmStory()!.phase == "draft" && app.dispatched.last == "creative")
+assert(app.loadFilmStory()!.approvedHash.isEmpty)
+var failedReview = app.loadFilmStory()!
+failedReview.phase = "needs_attention"
+app.saveFilmStory(failedReview)
+if let i = app.ledger.rows.firstIndex(where:{$0.id == failedReview.taskID}) { app.ledger.rows[i].owner = "research";app.ledger.rows[i].state = "failed" }
+assert(!app.canReviseFilmStory(failedReview))
+print("PASS: only failed Creative consultation can retry from needs_attention; no stale-script Research handoff")
+
+var terminalStory = app.loadFilmStory()!
+terminalStory.phase = "draft";app.saveFilmStory(terminalStory)
+app.refreshFilmStory()
+assert(app.loadFilmStory()!.phase == "needs_attention")
+assert(app.ledger.rows.first(where:{$0.id == terminalStory.id})?.state == "failed")
+print("PASS: failed consultation terminalizes aggregate story status")

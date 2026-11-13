@@ -45,6 +45,7 @@ extension JarvisApp {
         guard let task = ledger.load().first(where:{$0.id == story.taskID}) else { return }
         if ["failed","cancelled"].contains(task.state) {
             story.phase = "needs_attention";story.feedback = task.resultSummary;_ = saveFilmStory(story)
+            updateTask(story.id,state:task.state,summary:"Story consultation needs attention. " + task.resultSummary)
             say("The story consultation needs attention. " + TaskLedger.headline(task.resultSummary));return
         }
         guard task.state == "completed",let file = resultFile(task.id),let raw = try? String(contentsOf:file,encoding:.utf8) else { return }
@@ -169,8 +170,13 @@ extension JarvisApp {
         dispatch("creative")
         return "I have assigned the approved screenplay to Creative for film production."
     }
+    func canReviseFilmStory(_ story: FilmStory) -> Bool {
+        if ["awaiting_approval","production_needs_attention","completed"].contains(story.phase) { return true }
+        guard story.phase == "needs_attention", let task = ledger.load().first(where:{$0.id == story.taskID}) else { return false }
+        return task.state == "failed" && task.owner == "creative" && task.title.hasPrefix("[Story consultation]")
+    }
     func reviseFilmStory(_ id: String, feedback: String) {
-        guard var story = loadFilmStory(),story.id == id,["awaiting_approval","production_needs_attention","completed"].contains(story.phase),!feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
+        guard var story = loadFilmStory(),story.id == id,canReviseFilmStory(story),!feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
         if !story.approvedHash.isEmpty {
             story.history.append("Historical production approval: " + story.approvedHash + " at " + story.approvedAt + ". Owner requested a new revision; this authorization does not apply to the replacement.")
         }
@@ -190,7 +196,7 @@ extension JarvisApp {
         for file in files.filter({$0.pathExtension == "json"}).sorted(by:{$0.lastPathComponent < $1.lastPathComponent}) {
             guard let data = try? Data(contentsOf:file),let request = try? JSONDecoder().decode(StoryRevisionRequest.self,from:data),
                   UUID(uuidString:request.id) != nil,let story = loadFilmStory(),story.id == request.storyID,story.hash == request.expectedHash,
-                  ["awaiting_approval","production_needs_attention","completed"].contains(story.phase),
+                  canReviseFilmStory(story),
                   !request.feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { continue }
             let archive = support.appendingPathComponent("story-revision-history/" + request.id)
             do {

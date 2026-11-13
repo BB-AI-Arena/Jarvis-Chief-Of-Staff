@@ -322,7 +322,7 @@ extension JarvisApp {
         runSeat("creative",parent:parent,owner:model + " · screenplay writer") { [weak self] taskID,done in
             var failure: String?
             self?.noteTask(taskID,summary:"Writing the complete screenplay with " + model)
-            ClaudeClient.converse(DirectorBrief.make(role:"creative",instructions:parent.instructions),model:model,apiKey:apiKey,system:system,tools:[],isCancelled:{[weak self] in self?.seatRuns["creative"] != taskID},tool:{_,_,reply in reply("This writing-only assignment has no external tools; use the supplied packet.")},diagnostic:{reason in failure = reason},maxTokens:12000) { text in
+            ClaudeClient.converse(DirectorBrief.make(role:"creative",instructions:parent.instructions),model:model,apiKey:apiKey,system:system,tools:[],isCancelled:{[weak self] in self?.seatRuns["creative"] != taskID},tool:{_,_,reply in reply("This writing-only assignment has no external tools; use the supplied packet.")},diagnostic:{reason in failure = reason},maxTokens:12000,writingOnlyThinking:true) { text in
                 done(text,text == nil ? (failure ?? "The screenplay writer returned no complete answer.") : nil)
             }
             return nil
