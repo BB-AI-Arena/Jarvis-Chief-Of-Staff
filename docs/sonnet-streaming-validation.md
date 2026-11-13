@@ -37,3 +37,9 @@ All 55 worker tests passed, including invalid explanations, unsupported coverage
 A job-scoped opening plate can replace generated lettering with a real-font PNG, bound to the approved screenplay hash, two nonblank distinct approved text lines, image hash and shot timing. Valid PNG dimensions must match metadata. The worker uploads that plate to DARK and uses NVIDIA NVENC for the fade clip, checking encoded dimensions and exact frame count. Cached clips are reused only when their signatures and file hashes match.
 
 All 57 worker tests passed, including malformed text metadata, changed source pixels, dimension mismatches, incorrect export frame counts/dimensions and tampered cache regeneration. The test command uses the existing film Python runtime if the system Python lacks Pillow. These technical checks do not replace visual inspection of the actual encoded opening or creative acceptance of the completed film.
+
+## Whole-batch format repair
+
+Batch validation now checks the full duration, references and required fields before skipping repair. A batch of five valid five-second units no longer passes for a required thirty-second interval. The editor receives assigned approved goals and the reference legend, with at most two repair attempts; unresolved format errors become a non-retryable needs-attention state. Existing valid batches require no editor call.
+
+All 58 worker tests and three supervisor tests passed, including the 25-to-30-second regression and the two-attempt stop. Successful format validation does not establish semantic or visual acceptance of newly generated footage.

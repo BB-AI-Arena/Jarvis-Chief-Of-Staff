@@ -120,6 +120,19 @@ class FilmTests(unittest.TestCase):
                 (Path(tmp)/'shot-001.mp4').write_bytes(b'tampered')
                 f.typeset_clip(shot,0,plate);self.assertEqual(render.call_count,2)
 
+    def test_batch_repair_catches_missing_time_even_when_each_unit_is_valid(self):
+        shot=self.plan()['shots'][0];short={'shots':[dict(shot,seconds=5) for _ in range(5)]};complete={'shots':[dict(shot,seconds=5) for _ in range(6)]}
+        assigned={'event':'Approved next event','shot_goals':['Six approved coverage goals']}
+        with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
+            f=w.Film(self.spec(),tmp)
+            with patch.object(f,'claude',return_value=complete) as editor:
+                result=f.bound_shot_durations(short,30,assigned)
+                self.assertIn('Approved next event',editor.call_args.args[0]);editor.assert_called_once()
+            self.assertEqual(sum(s['seconds'] for s in result['shots']),30)
+            with patch.object(f,'claude',return_value=short) as editor:
+                with self.assertRaisesRegex(ValueError,'two bounded format repairs'):f.bound_shot_durations(short,30,assigned)
+                self.assertEqual(editor.call_count,2)
+
     def test_failed_shot_does_not_block_independent_clips(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
             f=w.Film(self.spec(),tmp);plan=self.plan();plan['shots']*=3;finished=[];calls={}

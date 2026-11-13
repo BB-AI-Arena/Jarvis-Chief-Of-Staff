@@ -552,18 +552,31 @@ class Film:
             parts+=following;atomic(prefix_file,{'segments':parts})
         atomic(path,{'segments':parts});return validate_screenplay({'segments':parts},duration)
 
-    def bound_shot_durations(self, part, total):
-        if all(isinstance(s.get('seconds'),int) and 1 <= s['seconds'] <= 5 for s in part.get('shots',[])):
+    def bound_shot_durations(self, part, total, assigned=None):
+        try:
+            validate_shots(part,total,len(self.refs))
             return part
-        self.progress('Splitting overlong render units while preserving the approved scene timing')
-        repaired=self.claude('Repair ONLY the render-unit duration limits in this production batch. Preserve every approved event, exact dialogue/UI, reference identity and chronological action. '
-            'The batch duration remains exactly '+str(total)+' seconds. Each shot must be 1 through 5 integer seconds. '
-            'Preserve short opening title-card timing. Split a longer shot into distinct consecutive coverage of the SAME event; do not repeat the full action in each split. '
-            'Do not add story events, people, props or narration. Return the complete {"shots":[...]} batch with all existing fields. '
-            'Reference-free screen/prop inserts use descriptive reference_free_reason and empty references; do not add unrelated art.\nBATCH: '+json.dumps(part),
-            system='You are a production editor subdividing the exact approved film for the local renderer, not rewriting it.',maximum=5000)
-        validate_shots(repaired,total,len(self.refs))
-        return repaired
+        except ValueError as error:
+            issue=str(error)
+        self.progress('Repairing production batch format while preserving the approved scene timing')
+        for attempt in range(2):
+            repaired=self.claude('Repair ONLY the production batch schema/timing/reference mapping. Validation error: '+issue+'. '
+                'Preserve every approved event, exact dialogue/UI, reference identity and chronological action. '
+                'The batch duration must be exactly '+str(total)+' seconds, with each shot 1 through 5 integer seconds. '
+                'Preserve short opening title-card timing. Split longer units into distinct consecutive coverage of the SAME event; never repeat the full action. '
+                'If time or coverage is missing, cover the supplied assigned goals, not invented events. No added people, props or narration. '
+                'Do not paraphrase approved dialogue to fit: split it across consecutive cues without changing words. '
+                'Reference-free screen/prop inserts need coverage_type:screen_insert or prop_insert and a descriptive reference_free_reason; never attach unrelated artwork. '
+                'Reference indices are zero-based and must correspond to actual visible identities in this legend: '+json.dumps([{'index':i,'identity':r.get('role',Path(r['source']).name)} for i,r in enumerate(self.refs)])+'. '
+                'Return the complete {"shots":[...]} batch with purpose, seconds, reference_indices, image_prompt, prompt, narration, location and all existing identity fields. '
+                '\nASSIGNED APPROVED GOALS: '+json.dumps(assigned)+'\nBATCH: '+json.dumps(part),
+                system='You are a production editor preparing the exact approved film for the local renderer, not rewriting it.',maximum=5000)
+            try:
+                validate_shots(repaired,total,len(self.refs))
+                return repaired
+            except ValueError as error:
+                issue=str(error);part=repaired
+        raise ValueError('Recovery needs attention: invalid production batch after two bounded format repairs: '+issue)
 
     def bound_narration(self, part):
         long=[{'index':i,'text':shot.get('narration','')} for i,shot in enumerate(part.get('shots',[])) if len(shot.get('narration','').split())>11]
@@ -665,7 +678,7 @@ class Film:
                 if len(part.get('shots', [])) == count and length == count * 5:
                     for shot in part['shots']:
                         shot.setdefault('seconds', 5)
-                if self.approved_rules: part=self.bound_shot_durations(part,length)
+                if self.approved_rules: part=self.bound_shot_durations(part,length,assigned)
                 self.bound_narration(part)
                 fixed=self.root/'opening-locked.json'
                 if batch==0 and fixed.exists():
