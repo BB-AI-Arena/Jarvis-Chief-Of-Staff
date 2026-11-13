@@ -151,7 +151,7 @@ def validate_shots(plan, total, reference_count, expected_count=None):
         refs = shot.get('reference_indices', [])
         if not isinstance(shot.get('seconds'), int) or not 1 <= shot['seconds'] <= 5:
             raise ValueError('Unsupported shot duration')
-        insert = shot.get('coverage_type') in ('screen_insert', 'prop_insert') and shot.get('reference_free_reason') == 'No artwork-defined identity is visible'
+        insert = shot.get('coverage_type') in ('screen_insert', 'prop_insert') and isinstance(shot.get('reference_free_reason'), str) and len(shot['reference_free_reason'].strip()) >= 12
         minimum=0 if shot.get('environment_only') is True or insert else 1
         if not minimum <= len(refs) <= 3 or len(set(refs)) != len(refs) or not all(isinstance(n, int) and 0 <= n < reference_count for n in refs):
             raise ValueError('Invalid artwork selection for shot %s' % (i+1))
@@ -552,6 +552,19 @@ class Film:
             parts+=following;atomic(prefix_file,{'segments':parts})
         atomic(path,{'segments':parts});return validate_screenplay({'segments':parts},duration)
 
+    def bound_shot_durations(self, part, total):
+        if all(isinstance(s.get('seconds'),int) and 1 <= s['seconds'] <= 5 for s in part.get('shots',[])):
+            return part
+        self.progress('Splitting overlong render units while preserving the approved scene timing')
+        repaired=self.claude('Repair ONLY the render-unit duration limits in this production batch. Preserve every approved event, exact dialogue/UI, reference identity and chronological action. '
+            'The batch duration remains exactly '+str(total)+' seconds. Each shot must be 1 through 5 integer seconds. '
+            'Preserve short opening title-card timing. Split a longer shot into distinct consecutive coverage of the SAME event; do not repeat the full action in each split. '
+            'Do not add story events, people, props or narration. Return the complete {"shots":[...]} batch with all existing fields. '
+            'Reference-free screen/prop inserts use descriptive reference_free_reason and empty references; do not add unrelated art.\nBATCH: '+json.dumps(part),
+            system='You are a production editor subdividing the exact approved film for the local renderer, not rewriting it.',maximum=5000)
+        validate_shots(repaired,total,len(self.refs))
+        return repaired
+
     def bound_narration(self, part):
         long=[{'index':i,'text':shot.get('narration','')} for i,shot in enumerate(part.get('shots',[])) if len(shot.get('narration','').split())>11]
         if not long:return
@@ -652,17 +665,18 @@ class Film:
                 if len(part.get('shots', [])) == count and length == count * 5:
                     for shot in part['shots']:
                         shot.setdefault('seconds', 5)
+                if self.approved_rules: part=self.bound_shot_durations(part,length)
                 self.bound_narration(part)
                 fixed=self.root/'opening-locked.json'
                 if batch==0 and fixed.exists():
                     locked=json.loads(fixed.read_text());part['shots'][:len(locked)]=locked
-                validate_shots(part, length, len(self.refs), count)
+                validate_shots(part, length, len(self.refs), None if self.approved_rules else count)
                 part['_schedule_signature']=schedule_hash
                 if batch_file.exists():
                     (self.root/'planning-diagnostics').mkdir(exist_ok=True)
                     batch_file.rename(self.root/'planning-diagnostics'/('superseded-'+str(int(time.time()))+'-'+batch_file.name))
                 atomic(batch_file, part)
-            validate_shots(part, length, len(self.refs), count)
+            validate_shots(part, length, len(self.refs), None if self.approved_rules else count)
             for local_index, directed in enumerate(part['shots']):
                 override=self.state.get('shot_overrides',{}).get(str(len(shots)+local_index))
                 if override:apply_shot_override(directed,override)

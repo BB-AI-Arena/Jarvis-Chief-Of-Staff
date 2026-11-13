@@ -32,10 +32,21 @@ class FilmTests(unittest.TestCase):
     def test_reference_free_insert_never_invents_a_character_reference(self):
         shot=self.plan()['shots'][0];shot['reference_indices']=[]
         with self.assertRaisesRegex(ValueError,'artwork selection'):w.validate_shots({'shots':[shot]},shot['seconds'],1)
-        shot.update(coverage_type='screen_insert',reference_free_reason='No artwork-defined identity is visible')
+        shot.update(coverage_type='screen_insert',reference_free_reason='A hand-only insert contains no visible cast face or collectible identity')
         self.assertEqual(w.validate_shots({'shots':[shot]},shot['seconds'],1),[shot])
         shot['reference_indices']=[7]
         with self.assertRaisesRegex(ValueError,'artwork selection'):w.validate_shots({'shots':[shot]},shot['seconds'],1)
+        shot['reference_indices']=[]
+        for reason in (None, False, 123456789012, '', '   ', 'too short'):
+            shot['reference_free_reason']=reason
+            with self.subTest(reason=reason),self.assertRaisesRegex(ValueError,'artwork selection'):
+                w.validate_shots({'shots':[shot]},shot['seconds'],1)
+        shot['reference_free_reason']='Only a screen is visible, without an artwork-defined subject'
+        shot['coverage_type']='character_closeup'
+        with self.assertRaisesRegex(ValueError,'artwork selection'):
+            w.validate_shots({'shots':[shot]},shot['seconds'],1)
+        shot['coverage_type']='prop_insert'
+        self.assertEqual(w.validate_shots({'shots':[shot]},shot['seconds'],1),[shot])
 
     def test_local_visual_only_blocks_cloud_still_fallback(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
@@ -44,6 +55,21 @@ class FilmTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'cloud still rendering is disabled'):
                     f.grok_scene('prompt',[],b'',0)
                 request.assert_not_called()
+
+    def test_duration_subdivision_preserves_short_card_and_total(self):
+        part=self.plan();base=part['shots'][0];card=dict(base,seconds=4);long=dict(base,seconds=6)
+        part['shots']=[card,long];repaired={'shots':[card,dict(long,seconds=3),dict(long,seconds=3)]}
+        with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
+            f=w.Film(self.spec(),tmp)
+            with patch.object(f,'claude',return_value=repaired) as editor:
+                result=f.bound_shot_durations(part,10)
+            self.assertEqual([s['seconds'] for s in result['shots']],[4,3,3]);editor.assert_called_once()
+            self.assertEqual(part['shots'][1]['seconds'],6)
+            with patch.object(f,'claude') as editor:
+                self.assertEqual(f.bound_shot_durations(result,10),result);editor.assert_not_called()
+            for invalid in ({'shots':[card,dict(long,seconds=5)]}, {'shots':[card,long]}):
+                with patch.object(f,'claude',return_value=invalid),self.assertRaises(ValueError):
+                    f.bound_shot_durations(part,10)
 
     def test_failed_shot_does_not_block_independent_clips(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):

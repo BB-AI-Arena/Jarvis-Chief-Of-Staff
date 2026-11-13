@@ -25,3 +25,9 @@ Independent regression checks passed: all 53 film-worker tests, film-budget test
 Registered supervised films attach to the task view before `plan.json` exists. Startup refreshes external jobs before projecting saved screenplay status, while failed, cancelled and stale-heartbeat supervision still fails closed. Approved-script casting can create a protagonist reference when the supplied artwork is only a logo; canonical references remain specific to that person and are reused on resume.
 
 All 54 worker tests passed, including protagonist reference creation and resume without duplicate generation. `tests/check_external_film_state.py` compiles the actual native refresh methods with real ledger/video state in a disposable directory; it verifies missing-plan attachment, one task record, failure, cancellation and stale-heartbeat behavior without touching runtime jobs.
+
+## Descriptive inserts and bounded render units
+
+Screen/prop inserts accept a descriptive non-empty explanation instead of requiring one exact phrase. Blank, short, non-text reasons and unsupported coverage still fail validation. For locked screenplay batches, a bounded production-editor request can subdivide overlong render units; the returned batch must retain its total duration and every shot must remain within the renderer's one-to-five-second limit. Variable shot counts allow a short title card without forcing another unit over the limit. Story-preservation instructions remain attached; duration validation is not semantic creative acceptance.
+
+All 55 worker tests passed, including invalid explanations, unsupported coverage, retained short-card timing, idempotent valid batches, changed-total rejection and rejection of still-overlong repair results.
