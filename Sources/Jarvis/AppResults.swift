@@ -23,10 +23,11 @@ extension JarvisApp {
                   let id = registration["id"] as? String, UUID(uuidString:id) != nil,
                   let state = filmJSON(folder.appendingPathComponent("film-state.json")),
                   let supervisor = filmJSON(folder.appendingPathComponent("supervisor.json")),
-                  let spec = filmJSON(folder.appendingPathComponent("job.json")),let total = spec["seconds"] as? Int,
-                  let plan = filmJSON(folder.appendingPathComponent("plan.json")),
-                  let data = try? JSONSerialization.data(withJSONObject:plan),let raw = String(data:data,encoding:.utf8),
-                  let parsed = VideoPlan.parse(raw,renderer:.comfy,total:total) else { continue }
+                  let spec = filmJSON(folder.appendingPathComponent("job.json")),let total = spec["seconds"] as? Int else { continue }
+            let parsed: VideoPlan.Plan? = filmJSON(folder.appendingPathComponent("plan.json")).flatMap { plan in
+                guard let data = try? JSONSerialization.data(withJSONObject:plan),let raw = String(data:data,encoding:.utf8) else { return nil }
+                return VideoPlan.parse(raw,renderer:.comfy,total:total)
+            }
             externalFilms[id] = folder
             let delivery = filmJSON(folder.appendingPathComponent("delivery-status.json")) ?? [:]
             let upload = filmJSON(folder.appendingPathComponent("social-upload-status.json")) ?? [:]
@@ -36,7 +37,7 @@ extension JarvisApp {
             let complete = delivery["stage"] as? String == "Completed — video ready"
             let failed = ["needs_attention","cancelled"].contains(status) || (stale && status != "completed") || delivery["stage"] as? String == "Needs attention"
             var job = videoJobs[id] ?? VideoPlan.Progress(taskID:id)
-            job.loadDirected(parsed,total:parsed.seconds)
+            if let parsed { job.loadDirected(parsed,total:parsed.seconds) }
             job.renderer = "4090 · FLUX.2 → LTX-2.3"
             let clips = state["clips"] as? [String:Any] ?? [:]
             let scenes = state["scenes"] as? [String:Any] ?? [:]
@@ -54,7 +55,7 @@ extension JarvisApp {
             if let i = records.firstIndex(where:{$0.id == id}) {
                 records[i].state = taskState;records[i].resultSummary = job.note;records[i].updatedAt = TaskLedger.timestamp()
             } else {
-                records.insert(TaskRecord(id:id,state:taskState,verified:false,owner:"creative",createdAt:TaskLedger.timestamp(),updatedAt:TaskLedger.timestamp(),resultSummary:job.note,title:parsed.title),at:0)
+                records.insert(TaskRecord(id:id,state:taskState,verified:false,owner:"creative",createdAt:TaskLedger.timestamp(),updatedAt:TaskLedger.timestamp(),resultSummary:job.note,title:parsed?.title ?? "Approved film recovery"),at:0)
             }
         }
         if !externalFilms.isEmpty { publishTasks(records) }

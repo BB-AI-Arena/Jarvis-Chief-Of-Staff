@@ -213,7 +213,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         switch action {
         case "ready":
             send("ready", ["voiceReady": voiceReady, "root": root?.path ?? ""]); send("conversation", ["active": conversationActive])
-            refreshFilmStory()
+            refreshExternalFilms();refreshFilmStory()
             if filmStoryTimer == nil { filmStoryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refreshFilmStory() } }
             refreshExternalFilms()
             if externalFilmTimer == nil { externalFilmTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refreshExternalFilms() } }

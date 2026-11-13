@@ -491,7 +491,7 @@ class Film:
         if self.state.get('cast_prepared'):return
         if 'cast_blueprints' not in self.state:
             self.progress('Locking recurring supporting character appearances before filming')
-            cast=self.claude('Identify at most TWO original recurring supporting people already in this film bible. Exclude the main hero and any character already defined by the provided artwork names. '
+            cast=self.claude(('Identify at most TWO recurring visible people in the locked screenplay, INCLUDING the protagonist when the artwork contains only a logo. Exclude offscreen/contact-only people. ' if self.approved_rules else 'Identify at most TWO original recurring supporting people already in this film bible. Exclude the main hero and any character already defined by the provided artwork names. ') +
                 'Do not invent anyone new. A story with no recurring supporting people needs an empty list. Return {"cast":[{"name":"...","description":"50–80 words of stable visible face, age, hair, clothes and build"}]}. '
                 'These are fictional casting references, not extra events.\nBIBLE: '+json.dumps(bible)+'\nEXISTING ARTWORK: '+json.dumps([Path(r['source']).name for r in self.spec['artwork']]),
                 system='You are the film casting director preserving a small consistent original supporting cast.',maximum=1000).get('cast',[])[:2]
@@ -512,7 +512,7 @@ class Film:
                 prompt+='\nCritical correction: '+verdict['issues']
             if not verdict['pass']:raise ValueError('Local supporting cast portrait failed review: '+verdict['issues'])
             ref={'source':str(file),'image':self.image_path(output),'sha256':hashlib.sha256(data).hexdigest(),'cast_name':cast['name'],
-                 'role':'Canonical original supporting character '+cast['name']+': '+cast['description']+'. Use only when this person is visible; never substitute the main hero.'}
+                 'role':'Canonical original character '+cast['name']+': '+cast['description']+'. Use only when this exact person is visible; never substitute another person.'}
             self.state.setdefault('cast_references',[]).append(ref);self.refs.append(ref);self.previews.append(self.preview_ref(len(self.refs)-1));self.save()
         self.state['cast_prepared']=True;self.save()
 

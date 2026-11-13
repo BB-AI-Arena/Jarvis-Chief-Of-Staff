@@ -19,3 +19,9 @@ The source manifest contains 100 application inputs. The independent audit uses 
 The subsequent worker repair permits explicitly identified screen/prop inserts without unrelated artwork references. It verifies the supplied approved screenplay hash, adds that complete script and production constraints to director requests, and bypasses prior local outlines for a locked screenplay. Films configured `local_render_only` refuse the cloud still-image fallback. These checks bind the planning input; creative review is still needed to establish scene fidelity.
 
 Independent regression checks passed: all 53 film-worker tests, film-budget tests and supervisor tests. The signed package was installed at an idle point before publication. The existing screenplay approval and spend records were preserved. This release does not claim a completed or accepted film.
+
+## Planning visibility and protagonist references
+
+Registered supervised films attach to the task view before `plan.json` exists. Startup refreshes external jobs before projecting saved screenplay status, while failed, cancelled and stale-heartbeat supervision still fails closed. Approved-script casting can create a protagonist reference when the supplied artwork is only a logo; canonical references remain specific to that person and are reused on resume.
+
+All 54 worker tests passed, including protagonist reference creation and resume without duplicate generation. `tests/check_external_film_state.py` compiles the actual native refresh methods with real ledger/video state in a disposable directory; it verifies missing-plan attachment, one task record, failure, cancellation and stale-heartbeat behavior without touching runtime jobs.

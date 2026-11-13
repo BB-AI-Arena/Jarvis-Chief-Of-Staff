@@ -432,6 +432,27 @@ class FilmTests(unittest.TestCase):
                 graph=queue.call_args.args[0]
                 self.assertEqual([graph['ref_%s'%i]['inputs']['image'] for i in range(3)],['hero.png','June.png','chase.png'])
 
+    def test_approved_protagonist_reference_is_retained_on_resume(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
+            spec=self.spec();script='Alex is the visible protagonist. No other people appear.'
+            spec.update(approved_screenplay=script,approved_screenplay_sha256=hashlib.sha256(script.encode()).hexdigest())
+            spec['artwork'][0]['source']='company-logo.png'
+            film=w.Film(spec,tmp);cast={'name':'Alex','description':'An original adult collector with short dark hair and a plain jacket.'}
+            with patch.object(film,'claude',return_value={'cast':[cast]}) as director,patch.object(film,'comfy',return_value=({'filename':'alex.png','type':'output'},'id')),patch.object(film,'view',return_value=b'portrait-fixture'),patch.object(film,'review',return_value={'pass':True}),patch.object(w,'image_block',return_value=[]):
+                film.ensure_cast({'title':'Approved story'})
+            self.assertIn('INCLUDING the protagonist',director.call_args.args[0])
+            ref=film.state['cast_references'][0]
+            self.assertEqual(ref['cast_name'],'Alex')
+            self.assertIn('only when this exact person is visible',ref['role'])
+            self.assertNotIn('never substitute the main hero',ref['role'])
+            self.assertEqual(len(spec['artwork']),1)
+            resumed=w.Film(spec,tmp)
+            with patch.object(resumed,'claude') as director,patch.object(resumed,'comfy') as renderer:
+                resumed.ensure_cast({'title':'Approved story'})
+                director.assert_not_called();renderer.assert_not_called()
+            self.assertEqual(resumed.refs[-1]['cast_name'],'Alex')
+
     def test_generated_cast_does_not_mutate_job_artwork_or_checkpoint_hash(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
             spec=self.spec();film=w.Film(spec,tmp)
