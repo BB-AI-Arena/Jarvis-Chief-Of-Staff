@@ -31,7 +31,7 @@ That is the direction of **Jarvis-Chief-Of-Staff**: a personal AI headquarters w
 
 **Experimental:** board debates, Operations workers and film Studio. Debate prompts and transcript handling have automated coverage, but a live multi-provider debate is not established by that coverage. Operations uses a configured runtime model; this README does not certify that `gpt-6-sol` is available or has completed an assignment.
 
-New director requests use a conservative **$10 USD daily allowance per director**. Unbounded jobs are blocked. See [spending controls](docs/spending-controls.md) for supported paths and limitations, and [validation](docs/reliability-validation.md) for actual results.
+New director requests use a conservative **$15 USD daily allowance for Creative and $10 USD for each other director**. Unbounded jobs are blocked. See [spending controls](docs/spending-controls.md) for supported paths and limitations, and [validation](docs/reliability-validation.md) for actual results.
 
 ## See the actual app
 

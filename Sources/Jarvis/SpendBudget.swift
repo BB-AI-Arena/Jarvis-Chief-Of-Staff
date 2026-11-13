@@ -7,9 +7,10 @@ import Darwin
 enum SpendBudget {
     static var directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis/Budgets")
     static let dailyMicroUSD = 10_000_000
+    static func dailyLimit(_ seat: String) -> Int { seat == "creative" ? 15_000_000 : dailyMicroUSD }
     static var allowsUnboundedJobs: Bool { false }
     static var allowsBudgetedFilm: Bool { true }
-    static let blocked = "Daily $10 director budget: this job has no enforceable maximum charge, so it was not started."
+    static let blocked = "Daily director budget: this job has no enforceable maximum charge, so it was not started."
     struct Hold: Codable { var seat: String; var microUSD: Int }
     struct State: Codable { var day: String; var reserved: [String: Int]; var holds: [String: Hold]? = [:] }
     struct Ticket { let id: String; let day: String }
@@ -24,7 +25,8 @@ enum SpendBudget {
         reserveTicket(seat: seat, microUSD: microUSD, now: now) != nil
     }
     static func reserveTicket(seat: String, microUSD: Int, now: Date = Date()) -> Ticket? {
-        guard microUSD > 0, microUSD <= dailyMicroUSD else { return nil }
+        let limit = dailyLimit(seat)
+        guard microUSD > 0, microUSD <= limit else { return nil }
         do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) } catch { return nil }
         let fd = open(directory.appendingPathComponent("lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard fd >= 0 else { return nil }; defer { close(fd) }
@@ -34,11 +36,11 @@ enum SpendBudget {
         do {
             if FileManager.default.fileExists(atPath: file.path) {
                 state = try JSONDecoder().decode(State.self, from: Data(contentsOf: file))
-                guard state.reserved.values.allSatisfy({ $0 >= 0 && $0 <= dailyMicroUSD }), state.day <= stamp else { return nil }
+                guard state.reserved.allSatisfy({ $0.value >= 0 && $0.value <= dailyLimit($0.key) }), state.day <= stamp else { return nil }
                 if state.day != stamp { state = State(day: stamp, reserved: [:]) }
             }
             let used = state.reserved[seat, default: 0]
-            guard microUSD <= dailyMicroUSD - used else { return nil }
+            guard microUSD <= limit - used else { return nil }
             let ticket = Ticket(id: UUID().uuidString, day: stamp)
             state.reserved[seat] = used + microUSD
             if state.holds == nil { state.holds = [:] }
@@ -130,7 +132,7 @@ enum BudgetHTTP {
             let task = URLSession.shared.dataTask(with: URL(string: "about:blank")!)
             task.cancel()
             DispatchQueue.global().async {
-                let reason = SpendBudget.maximum(request) == nil ? SpendBudget.blocked : "Daily $10 director budget: insufficient remaining allowance or unreadable budget state. No request was sent."
+                let reason = SpendBudget.maximum(request) == nil ? SpendBudget.blocked : "Daily director budget: insufficient remaining allowance or unreadable budget state. No request was sent."
                 completionHandler(nil, nil, NSError(domain: "JarvisBudget", code: 1, userInfo: [NSLocalizedDescriptionKey: reason]))
             }
             return task

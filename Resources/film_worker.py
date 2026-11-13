@@ -83,6 +83,10 @@ def safe_error(error):
 
 def http(url, body=None, headers=None, timeout=120, binary=False):
     check_stop()
+    if os.environ.get('JARVIS_LOCAL_FILM_ONLY') == '1':
+        allowed={os.environ.get('JARVIS_FILM_LOCAL_HOST'),'127.0.0.1','localhost'}
+        if urllib.parse.urlparse(url).hostname not in allowed:
+            raise RuntimeError('Local-only film: external provider/network request refused; checkpoint retained')
     if urllib.parse.urlparse(url).hostname in ('api.anthropic.com', 'api.x.ai'):
         broker = os.environ.get('JARVIS_FILM_BUDGET_BROKER')
         if not broker or not os.path.isfile(broker) or not os.access(broker, os.X_OK):
@@ -96,7 +100,14 @@ def http(url, body=None, headers=None, timeout=120, binary=False):
     if body is not None:
         request.add_header('Content-Type', 'application/json')
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        if os.environ.get('JARVIS_LOCAL_FILM_ONLY') == '1':
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self,*args,**kwargs):
+                    raise RuntimeError('Local-only film refuses redirects; checkpoint retained')
+            opener=urllib.request.build_opener(NoRedirect())
+            response_context=opener.open(request,timeout=timeout)
+        else:response_context=urllib.request.urlopen(request,timeout=timeout)
+        with response_context as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
         try:
@@ -395,13 +406,50 @@ class Film:
         self.save()
         emit('usage', seat=seat, model=model, usage=usage)
 
+    def local_director(self, prompt, blocks, system, maximum):
+        endpoint=self.spec.get('local_model_endpoint','http://'+urllib.parse.urlparse(self.server).hostname+':11434').rstrip('/')
+        parsed=urllib.parse.urlparse(endpoint)
+        if parsed.scheme!='http' or parsed.hostname!=urllib.parse.urlparse(self.server).hostname or parsed.port!=11434 or parsed.path or parsed.username or parsed.query:
+            raise ValueError('Local director must use DARK Ollama on port11434; no external fallback')
+        # Never evict an active render or another queued Comfy job. Release only idle cached weights.
+        deadline=time.monotonic()+900
+        while True:
+            queue=http(self.server+'/queue',timeout=15)
+            if not queue.get('queue_running') and not queue.get('queue_pending'):break
+            if time.monotonic()>deadline:raise ValueError('DARK is busy; local director checkpoint retained')
+            check_stop();time.sleep(1)
+        http(self.server+'/free',{'unload_models':True,'free_memory':True},timeout=30,binary=True)
+        images=[];labels=[]
+        for block in blocks:
+            if block.get('type')=='text':labels.append(block.get('text',''))
+            elif block.get('type')=='image':
+                source=block.get('source',{})
+                if source.get('type')!='base64':raise ValueError('Local review requires embedded image bytes')
+                images.append(source['data'])
+        user={'role':'user','content':prompt+'\n\n'+'\n'.join(labels)}
+        if images:user['images']=images
+        model=self.spec.get('local_model','qwen3.5:latest')
+        self.progress('Local '+model+(' is reviewing frames on DARK' if images else ' is directing the approved film on DARK'))
+        body=http(endpoint+'/api/chat',{'model':model,'stream':False,'think':False,'format':'json','keep_alive':0,
+            'messages':[{'role':'system','content':system},user],
+            'options':{'num_ctx':65536,'num_predict':maximum,'num_batch':128,'temperature':0.1}},timeout=900)
+        self.usage('creative','local:'+model,body)
+        raw=body.get('message',{}).get('content','')
+        (self.root/'last-local-director-output.txt').write_text(raw)
+        if body.get('done') is not True or body.get('done_reason')=='length':
+            raise ValueError('Local director response incomplete/truncated; checkpoint retained')
+        return object_json(raw)
+
     def claude(self, prompt, blocks=(), system=None, maximum=6000):
         check_stop()
-        if self.state['tokens'] > self.spec.get('token_budget', 1_500_000):
+        limit=max(8_000_000,self.spec.get('token_budget',0)) if self.spec.get('local_production') else self.spec.get('token_budget',1_500_000)
+        if self.state['tokens'] > limit:
             raise ValueError('Film planning/review token limit reached; checkpoint retained')
         model = self.spec.get('model', 'claude-sonnet-5-5')
         base=system or (self.spec['director_system']+'\nLocal engine exception: an occasional environment_only:true establishing/POV shot may use reference_index:null and reference_indices:[] when no artwork-defined subject is visible. Character/merchandise shots still require their actual artwork references. Environment coverage cannot replace an essential user-requested character event and needs real environmental progression, not only a digital zoom.')
         base += '\n' + self.approved_rules
+        if self.spec.get('local_production'):
+            return self.local_director(prompt,blocks,base+'\nReturn exactly one complete valid JSON object.',maximum)
         body = http('https://api.anthropic.com/v1/messages', {
             'model': model, 'max_tokens': maximum,
             # Sonnet 5.5 defaults to adaptive thinking; bounded JSON tasks must reserve output for the schema.
@@ -1563,6 +1611,9 @@ def main():
     args = parser.parse_args()
     path = Path(args.job)
     spec = json.loads(path.read_text())
+    if spec.get('local_production'):
+        os.environ['JARVIS_LOCAL_FILM_ONLY']='1'
+        os.environ['JARVIS_FILM_LOCAL_HOST']=urllib.parse.urlparse(spec['server']).hostname
     worker_lock = (path.parent / 'worker.lock').open('a')
     try:
         fcntl.flock(worker_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

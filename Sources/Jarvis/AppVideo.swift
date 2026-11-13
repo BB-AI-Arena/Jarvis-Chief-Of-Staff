@@ -139,7 +139,7 @@ extension JarvisApp {
                     }
                     monitor?.start()
                 }
-                if let comfy=engine as? ComfyVideo,!comfy.artwork.isEmpty {
+                if let comfy=engine as? ComfyVideo {
                     guard let script=Bundle.main.url(forResource:"film_supervisor",withExtension:"py") else { finish(nil,"The local film engine is missing from this build.");return }
                     let spec=LocalFilmWorker.spec(brief:brief,seconds:total,artwork:comfy.artwork,workflow:comfy.workflow,server:server,dark:dark,project:self.project,model:self.cursorModel.hasPrefix("claude-") ? self.cursorModel : self.claudeModel,clientID:comfy.clientID)
                     var ended=false
@@ -239,6 +239,8 @@ extension JarvisApp {
         }
     }
     func planVideo(taskID: String, brief: String, total: Int, renderer: VideoPlan.Renderer, artwork: [VideoArtwork.Reference] = [], completion: @escaping (VideoPlan.Plan?) -> Void) {
+        // DARK films are planned exclusively by the local worker; never fall through to paid providers.
+        if renderer == .comfy { completion(nil); return }
         if !artwork.isEmpty {
             guard claudeConnected, let key = ClaudeCredential.read() else { completion(nil); return }
             noteTask(taskID, summary: "Creative is inspecting artwork and writing a story")

@@ -12,8 +12,10 @@ enum LocalFilmWorker {
             if let role=ref.role { value["role"]=role };return value
         },"workflow":workflow,"server":server,"dark":["host":dark.host,"user":dark.user,"key":dark.key],
          "project":project.path,"model":model,"client_id":clientID,"director_system":VideoArtwork.storyboardSystem,
+         "local_production":true,"local_render_only":true,"local_model":"qwen3.5:latest","local_model_endpoint":"http://\(dark.host):11434",
          "token_budget":tokenBudget(seconds:seconds),"max_grok_stills":min(10,max(1,Int(ceil(Double(seconds)/60))))]
     }
+    private static func darkHost(_ spec: [String:Any]) -> String { URL(string:spec["server"] as? String ?? "")?.host ?? "" }
     @discardableResult static func start(spec:[String:Any],folder:URL,project:URL,script:URL,event:@escaping ([String:Any])->Void,completion:@escaping (Int32)->Void)->Process? {
         guard canStart() else { event(["type":"failed","message":SpendBudget.blocked]);completion(1);return nil }
         do {
@@ -25,7 +27,10 @@ enum LocalFilmWorker {
         process.executableURL=project.appendingPathComponent(".voice/bin/python")
         process.arguments=["-B",script.path,"--job",folder.appendingPathComponent("job.json").path]
         var environment = ProcessInfo.processInfo.environment
-        environment["JARVIS_FILM_BUDGET_BROKER"] = Bundle.main.executableURL?.path
+        if spec["local_production"] as? Bool == true {
+            environment["JARVIS_LOCAL_FILM_ONLY"] = "1"
+            environment["JARVIS_FILM_LOCAL_HOST"] = darkHost(spec)
+        } else { environment["JARVIS_FILM_BUDGET_BROKER"] = Bundle.main.executableURL?.path }
         process.environment = environment
         process.currentDirectoryURL=project
         process.standardInput=FileHandle.nullDevice;process.standardOutput=pipe

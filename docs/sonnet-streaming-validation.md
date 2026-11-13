@@ -43,3 +43,9 @@ All 57 worker tests passed, including malformed text metadata, changed source pi
 Batch validation now checks the full duration, references and required fields before skipping repair. A batch of five valid five-second units no longer passes for a required thirty-second interval. The editor receives assigned approved goals and the reference legend, with at most two repair attempts; unresolved format errors become a non-retryable needs-attention state. Existing valid batches require no editor call.
 
 All 58 worker tests and three supervisor tests passed, including the 25-to-30-second regression and the two-attempt stop. Successful format validation does not establish semantic or visual acceptance of newly generated footage.
+
+## Local film production and Creative allowance
+
+Film jobs default to local DARK planning and vision review, use embedded image inputs, unload the local model after each request, and wait for an empty render queue before releasing idle render weights. Local-only jobs reject external HTTP destinations and redirects. The Comfy memory-release response is treated as empty binary success rather than JSON.
+
+The owner raised Creative's daily allowance to $15; other directors retain $10. Existing recorded spending and holds remain counted. Budget tests verify the raised boundary and retained holds; local production tests verify external-provider refusal, vision payloads, model release and incomplete-response failure.
