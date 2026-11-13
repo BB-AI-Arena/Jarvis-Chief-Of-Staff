@@ -4,7 +4,17 @@ import AVFoundation
 import Speech
 
 
-if let index = CommandLine.arguments.firstIndex(of:"--adopt-reviewed-story") {
+if let index = CommandLine.arguments.firstIndex(of:"--record-story-approval") {
+    guard CommandLine.arguments.indices.contains(index+3) else { print("Usage: --record-story-approval exact-hash source-chat-uuid owner-text-file");exit(2) }
+    do {
+        let request = ExternalStoryApproval(scriptHash:CommandLine.arguments[index+1],sourceChatID:CommandLine.arguments[index+2],ownerText:try String(contentsOfFile:CommandLine.arguments[index+3],encoding:.utf8))
+        guard UUID(uuidString:request.sourceChatID) != nil,FilmStory.isExplicitApproval(request.ownerText) else { print("A direct explicit owner approval and source chat are required.");exit(2) }
+        let inbox = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis/external-story-approval-inbox")
+        try FileManager.default.createDirectory(at:inbox,withIntermediateDirectories:true)
+        try JSONEncoder().encode(request).write(to:inbox.appendingPathComponent(request.id + ".json"),options:.atomic)
+        print("Queued owner-chat approval attestation " + request.id + ". No production was dispatched.")
+    } catch { print("Could not record approval: " + error.localizedDescription);exit(2) }
+} else if let index = CommandLine.arguments.firstIndex(of:"--adopt-reviewed-story") {
     guard CommandLine.arguments.indices.contains(index+3) else { print("Usage: --adopt-reviewed-story script.md research-task-id creative-task-id");exit(2) }
     let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis")
     do {

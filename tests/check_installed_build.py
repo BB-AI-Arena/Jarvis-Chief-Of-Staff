@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import shutil
 import tempfile
+import struct
 
 
 def sha(data):
@@ -20,6 +21,34 @@ def files(root):
     return {str(p.relative_to(root)): sha(p.read_bytes()) for p in root.rglob('*') if p.is_file()}
 
 
+def canonical_unsigned_bytes(raw):
+    """Normalize only LC_SEGMENT_64 __LINKEDIT VM padding left by codesign removal."""
+    data = bytearray(raw)
+    assert len(data) >= 32 and struct.unpack_from('<I', data)[0] == 0xfeedfacf, 'Expected thin little-endian Mach-O64'
+    cpu = struct.unpack_from('<I', data, 4)[0]
+    page = {0x100000c: 16384, 0x1000007: 4096}.get(cpu)
+    assert page is not None, 'Unknown Mach-O architecture'
+    count, command_bytes = struct.unpack_from('<II', data, 16)
+    end = 32 + command_bytes
+    assert end <= len(data)
+    offset, found = 32, 0
+    for _ in range(count):
+        assert offset + 8 <= end
+        command, size = struct.unpack_from('<II', data, offset)
+        assert size >= 8 and offset + size <= end
+        assert command != 0x1d, 'Code signature was not removed'
+        if command == 0x19 and data[offset+8:offset+24].rstrip(b'\0') == b'__LINKEDIT':
+            assert size == 72, 'Unexpected LINKEDIT sections'
+            vm_size, file_offset, file_size = struct.unpack_from('<QQQ', data, offset+32)
+            assert file_offset + file_size == len(data), 'LINKEDIT must end at EOF'
+            assert file_size <= vm_size < file_size + 65536 and vm_size % page == 0, 'Unexpected LINKEDIT VM extent'
+            struct.pack_into('<Q', data, offset+32, ((file_size + page - 1) // page) * page)
+            found += 1
+        offset += size
+    assert offset == end and found == 1
+    return bytes(data)
+
+
 def unsigned_sha(binary):
     # Signing legitimately changes Mach-O bytes. Strip only a temporary copy;
     # never mutate the installed app, release artifact or signed package.
@@ -27,7 +56,7 @@ def unsigned_sha(binary):
         copy = Path(temporary) / 'Jarvis'
         shutil.copy2(binary, copy)
         subprocess.run(['codesign', '--remove-signature', str(copy)], check=True, capture_output=True)
-        return sha(copy.read_bytes())
+        return sha(canonical_unsigned_bytes(copy.read_bytes()))
 
 
 def main():

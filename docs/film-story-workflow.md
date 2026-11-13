@@ -53,3 +53,11 @@ At an idle terminal checkpoint, `--adopt-reviewed-story /absolute/script.md rese
 Successful validation archives the previous workflow, adoption request and full director results, preserves owner direction/history, and presents the complete assembled script as awaiting approval. Viewed and approval fields are cleared; adoption does not open the result on behalf of the owner, queue a production task or dispatch rendering. The owner must open and explicitly approve that exact version through the existing gate. Failed evidence validation leaves the screenplay unchanged.
 
 Regression coverage includes changed content, stale reviews, running calls, mismatched or contradictory confirmation, retained history, unread owner gate and no render dispatch.
+
+## Owner approval supplied through a chat
+
+`--record-story-approval exact-hash source-chat-uuid /absolute/owner-text.txt` records a local attestation of a direct owner message. The app requires an explicit approval phrase, a valid source chat identity, the current awaiting-approval phase and a matching script digest/runtime. It archives the prior workflow and the exact approval text/source, preserving provenance without asserting a UI view or inventing a platform message ID.
+
+The result is an approved screenplay record only. No render task is created or dispatched. The approved script's complete animatic and quality checks remain the next production step. The existing UI approval path remains unchanged; stale hashes and conditional statements are rejected, and duplicate submissions cannot launch work.
+
+The build-identity audit removes signatures from temporary copies and normalizes only the Mach-O `__LINKEDIT` VM allocation padding that signature removal leaves stale. All code, data and other load-command bytes remain covered. Thin architecture, command bounds, segment shape, EOF extent and bounded page padding are validated; malformed binaries fail closed. `tests/check_build_identity.py` verifies signing-only equivalence, changed-byte detection and malformed extent refusal against synthetic inputs and the actual package/release.

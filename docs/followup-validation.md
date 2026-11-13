@@ -22,7 +22,7 @@ python3 tests/check_installed_build.py --ref origin/main \
   --output .build/installed-publication-verification.json
 ```
 
-It requires every manifest entry to match the selected Git commit and working source, verifies strict code signatures, compares every installed bundle file with the built package, rejects extra or missing resources, compares the installed executable with the release binary after removing signatures from temporary copies only (signing legitimately changes Mach-O bytes), and invokes the installed broker with an unsupported destination to prove refusal before provider access. The report records the exact commit, tree and executable/bundle hashes.
+It requires every manifest entry to match the selected Git commit and working source, verifies strict code signatures, compares every installed bundle file with the built package, rejects extra or missing resources, compares the installed executable with the release binary after removing signatures from temporary copies only and normalizing only the validated `__LINKEDIT` VM padding left by signing (signing legitimately changes Mach-O bytes), and invokes the installed broker with an unsupported destination to prove refusal before provider access. The report records the exact commit, tree and executable/bundle hashes.
 
 Private runtime state, credentials, saved scripts and results are not part of source publication. Installation retains the existing Keychain helper and a rollback bundle. A matching installed bundle establishes build provenance; it does not independently establish director consensus, audible voice quality or final-film quality.
 

@@ -74,3 +74,10 @@ struct ReviewedStoryAdoption: Codable {
     let researchTaskID: String
     let creativeTaskID: String
 }
+
+struct ExternalStoryApproval: Codable {
+    var id = UUID().uuidString
+    let scriptHash: String
+    let sourceChatID: String
+    let ownerText: String
+}

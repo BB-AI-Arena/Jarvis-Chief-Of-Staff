@@ -178,6 +178,23 @@ extension JarvisApp {
         let action = ["generate","finish","resume","continue","write","send","approval"].contains { lower.contains($0) }
         return specific && action && !["another unrelated","separate new film"].contains { lower.contains($0) }
     }
+    /// Record a direct owner-chat approval without claiming a UI view or launching production.
+    @discardableResult func recordExternalStoryApproval(_ request: ExternalStoryApproval) -> Bool {
+        guard UUID(uuidString:request.id) != nil,UUID(uuidString:request.sourceChatID) != nil,
+              FilmStory.isExplicitApproval(request.ownerText),var story = loadFilmStory(),story.phase == "awaiting_approval",
+              story.runtime != nil,story.hash == request.scriptHash,FilmStory.digest(story.script) == request.scriptHash else { return false }
+        let archive = support.appendingPathComponent("external-story-approvals/" + request.id)
+        do {
+            try FileManager.default.createDirectory(at:archive,withIntermediateDirectories:true)
+            try JSONEncoder().encode(story).write(to:archive.appendingPathComponent("previous-story.json"),options:.atomic)
+            try JSONEncoder().encode(request).write(to:archive.appendingPathComponent("owner-chat-attestation.json"),options:.atomic)
+        } catch { return false }
+        story.phase = "approved";story.approvedHash = request.scriptHash;story.approvedAt = TaskLedger.timestamp()
+        story.history.append("Owner chat approval recorded at " + story.approvedAt + " from chat " + request.sourceChatID + ": " + request.ownerText + "\nExact screenplay: " + request.scriptHash + "\nNo UI view was asserted. Complete animatic and quality checks precede full rendering.")
+        guard saveFilmStory(story) else { return false }
+        updateTask(story.id,state:"completed",summary:"Owner approved the exact screenplay through chat; complete animatic and quality checks are required before full rendering.")
+        return true
+    }
     @discardableResult func approveFilmStory(_ id: String, hash: String, announce: Bool = true) -> String {
         guard var story = loadFilmStory(),story.id == id,story.canApprove(hash) else {
             let message = "Open and review the current screenplay before approving it. Approval must match its saved version."
@@ -232,6 +249,11 @@ extension JarvisApp {
 
     /// Poll a user-owned local inbox, independent of WebKit readiness or screen lock.
     func consumeStoryRevisionRequests() {
+        let approvalInbox = support.appendingPathComponent("external-story-approval-inbox")
+        for file in (try? FileManager.default.contentsOfDirectory(at:approvalInbox,includingPropertiesForKeys:nil)) ?? [] {
+            guard file.pathExtension == "json",let data = try? Data(contentsOf:file),let request = try? JSONDecoder().decode(ExternalStoryApproval.self,from:data) else { continue }
+            if recordExternalStoryApproval(request) { try? FileManager.default.removeItem(at:file) }
+        }
         let adoptionInbox = support.appendingPathComponent("reviewed-story-inbox")
         for file in (try? FileManager.default.contentsOfDirectory(at:adoptionInbox,includingPropertiesForKeys:nil)) ?? [] {
             guard file.pathExtension == "json",let data = try? Data(contentsOf:file),let request = try? JSONDecoder().decode(ReviewedStoryAdoption.self,from:data) else { continue }
