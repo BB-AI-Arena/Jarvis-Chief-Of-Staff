@@ -4,16 +4,19 @@ import AVFoundation
 import Speech
 
 
-if let index = CommandLine.arguments.firstIndex(of:"--story-revision-request") {
-    guard CommandLine.arguments.indices.contains(index+1) else { print("Usage: --story-revision-request /absolute/feedback.txt");exit(2) }
+if let index = CommandLine.arguments.firstIndex(of:"--story-revision-request") ?? CommandLine.arguments.firstIndex(of:"--director-writing-request") {
+    let workshop = CommandLine.arguments[index] == "--director-writing-request"
+    let fileIndex = index + (workshop ? 2 : 1)
+    let seat = workshop && CommandLine.arguments.indices.contains(index+1) ? CommandLine.arguments[index+1] : ""
+    guard CommandLine.arguments.indices.contains(fileIndex), (!workshop || ["creative","research"].contains(seat)) else { print("Usage: --story-revision-request /absolute/feedback.txt");exit(2) }
     let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis")
     do {
-        let feedback = try String(contentsOfFile:CommandLine.arguments[index+1],encoding:.utf8)
+        let feedback = try String(contentsOfFile:CommandLine.arguments[fileIndex],encoding:.utf8)
         guard !feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw NSError(domain:"StoryRevision",code:1) }
         let story = try JSONDecoder().decode(FilmStory.self,from:Data(contentsOf:support.appendingPathComponent("film-story.json")))
         let controller = JarvisApp()
-        guard controller.canReviseFilmStory(story) else { print("Story is busy or cannot be revised from its current phase.");exit(2) }
-        let request = StoryRevisionRequest(storyID:story.id,expectedHash:story.hash,feedback:feedback)
+        guard workshop ? ["needs_attention","awaiting_approval","completed","production_needs_attention"].contains(story.phase) : controller.canReviseFilmStory(story) else { print("Story is busy or cannot be revised from its current phase.");exit(2) }
+        let request = StoryRevisionRequest(storyID:story.id,expectedHash:story.hash,feedback:feedback,writingSeat:workshop ? seat : nil)
         let inbox = support.appendingPathComponent("story-revision-inbox")
         try FileManager.default.createDirectory(at:inbox,withIntermediateDirectories:true)
         try JSONEncoder().encode(request).write(to:inbox.appendingPathComponent(request.id + ".json"),options:.atomic)

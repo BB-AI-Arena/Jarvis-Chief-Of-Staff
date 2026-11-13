@@ -197,7 +197,7 @@ extension JarvisApp {
         for file in files.filter({$0.pathExtension == "json"}).sorted(by:{$0.lastPathComponent < $1.lastPathComponent}) {
             guard let data = try? Data(contentsOf:file),let request = try? JSONDecoder().decode(StoryRevisionRequest.self,from:data),
                   UUID(uuidString:request.id) != nil,let story = loadFilmStory(),story.id == request.storyID,story.hash == request.expectedHash,
-                  canReviseFilmStory(story),
+                  (request.writingSeat == nil ? canReviseFilmStory(story) : (["creative","research"].contains(request.writingSeat!) && ["needs_attention","awaiting_approval","completed","production_needs_attention"].contains(story.phase))),
                   !request.feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { continue }
             let archive = support.appendingPathComponent("story-revision-history/" + request.id)
             do {
@@ -205,6 +205,12 @@ extension JarvisApp {
                 try JSONEncoder().encode(story).write(to:archive.appendingPathComponent("previous-story.json"),options:.atomic)
                 try FileManager.default.moveItem(at:file,to:archive.appendingPathComponent("request.json"))
             } catch { continue }
+            if let seat = request.writingSeat {
+                let taskID = storyTask("[STORY SPINE WORKSHOP] Writing-only independent consultation. Return ONLY the requested story architecture or critique, not a screenplay. No assets, code changes, rendering, publishing, or owner approval. Do not call this screenplay consensus.\n" + request.feedback,seat:seat)
+                try? Data(taskID.utf8).write(to:archive.appendingPathComponent("task-id.txt"),options:.atomic)
+                dispatch(seat)
+                continue
+            }
             reviseFilmStory(story.id,feedback:request.feedback)
             let accepted = loadFilmStory()?.phase == "draft"
             try? Data((accepted ? "Writing-only revision queued" : "Revision not queued; inspect saved workflow").utf8).write(to:archive.appendingPathComponent("status.txt"),options:.atomic)

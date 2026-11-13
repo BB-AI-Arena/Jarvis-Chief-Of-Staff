@@ -62,4 +62,5 @@ struct StoryRevisionRequest: Codable {
     let storyID: String
     let expectedHash: String
     let feedback: String
+    var writingSeat: String? = nil
 }

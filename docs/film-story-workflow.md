@@ -37,3 +37,9 @@ Failed Creative writing requests can be retried from needs-attention when the cu
 Latest owner revision direction is stored separately from the evolving Research feedback. Every later writer/reviewer/confirmation handoff includes it verbatim alongside the baseline brief and source evidence. Tests ensure a reviewer report cannot erase the owner's new direction.
 
 Writing requests omit the tools field when no tools are available. Response-limit diagnostics retain only request/response model names, thinking mode, tool count, stop reason, numeric usage and content-block types/lengths; no raw reasoning or credentials are persisted. A thinking-only response remains a failed delivery, not a screenplay or director acceptance.
+
+## Independent story architecture workshop
+
+At a terminal screenplay checkpoint, `--director-writing-request creative /absolute/brief.txt` queues a separate real writing-only consultation task. The command also accepts `research` for a later independent critique of the complete saved spine. These tasks do not modify the screenplay workflow, approval, hash or script, and do not auto-start another screenplay or render. The request archive records the actual task ID. Research is submitted manually only after Creative's full saved result is available; workshop agreement is not screenplay approval.
+
+The dispatch regression verifies that the saved screenplay bytes remain unchanged and a repeated inbox scan cannot duplicate the workshop task.

@@ -123,3 +123,16 @@ let writingTask = app.ledger.rows.first(where:{$0.id == app.loadFilmStory()!.tas
 assert(writingTask.instructions.contains(contextStory.ownerRevisionFeedback!))
 assert(app.loadFilmStory()!.ownerRevisionFeedback == contextStory.ownerRevisionFeedback)
 print("PASS: latest owner revision direction survives Research and Creative handoffs")
+
+var workshopStory = app.loadFilmStory()!
+workshopStory.phase = "needs_attention";app.saveFilmStory(workshopStory)
+let beforeWorkshop = try! Data(contentsOf:app.filmStoryURL)
+let workshop = StoryRevisionRequest(storyID:workshopStory.id,expectedHash:workshopStory.hash,feedback:"Return a one-page story spine only.",writingSeat:"creative")
+try! JSONEncoder().encode(workshop).write(to:inbox.appendingPathComponent(workshop.id + ".json"))
+app.consumeStoryRevisionRequests()
+assert(try! Data(contentsOf:app.filmStoryURL) == beforeWorkshop)
+let workshopTask = app.ledger.rows.first(where:{$0.instructions.contains(workshop.feedback)})!
+assert(workshopTask.owner == "creative" && workshopTask.instructions.contains("not a screenplay"))
+let afterWorkshopCount = app.dispatched.count
+app.consumeStoryRevisionRequests();assert(app.dispatched.count == afterWorkshopCount)
+print("PASS: separate writing workshop dispatches once without modifying screenplay state or approval")
