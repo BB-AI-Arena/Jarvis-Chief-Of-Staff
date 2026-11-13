@@ -5,11 +5,14 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "build:presence": "esbuild Frontend/presence.mjs --bundle --minify --format=iife --legal-comments=linked --outfile=Resources/vendor/presence.js",
-    "test": "node tests/check_conversation.cjs && node tests/check_live.cjs"
+    "test": "node tests/check_conversation.cjs && node tests/check_live.cjs && node tests/check_board_motion.cjs",
+    "check:ui": "node --check Resources/app.js && node --check Resources/live.js && prettier --check Resources/app.js && npm test",
+    "format:ui": "prettier --write Resources/app.js"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
-    "three": "0.187.0",
-    "jsdom": "29.1.1"
+    "jsdom": "29.1.1",
+    "prettier": "3.6.2",
+    "three": "0.187.0"
   }
 }

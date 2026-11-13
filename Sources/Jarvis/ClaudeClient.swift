@@ -32,14 +32,14 @@ enum ClaudeClient {
             "model": model,
             "max_tokens": 1200,
             "system": system,
-            "messages": [["role": "user", "content": String(prompt.prefix(12000))]]
+            "messages": [["role": "user", "content": PromptDelivery.envelope(prompt)]]
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        let task = URLSession.shared.dataTask(with: request) { data, response, _ in
+        let task = BudgetHTTP.dataTask(with: request, seat: meterTag) { data, response, _ in
             TokenMeter.record(meterTag, model: model, data: data)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             var text: String?
-            if status == 200, let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let blocks = json["content"] as? [[String: Any]] {
+            if status == 200, let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let blocks = json["content"] as? [[String: Any]], json["stop_reason"] as? String != "max_tokens" {
                 let joined = blocks.compactMap { $0["text"] as? String }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !joined.isEmpty { text = joined }
             }
@@ -63,11 +63,27 @@ enum ClaudeClient {
             return (id, name, block["input"] as? [String: Any] ?? [:])
         }
     }
+    /// Bounded multi-prompt answers. Partial pages cannot masquerade as a complete result.
+    struct AnswerPages {
+        enum Step: Equatable { case more, complete, exhausted }
+        var remaining = 3
+        var parts: [String] = []
+        var complete = false
+        mutating func append(_ text: String?, limited: Bool) -> Step {
+            if let text { parts.append(text) }
+            if !limited { complete = text != nil;return complete ? .complete : .exhausted }
+            guard remaining > 0, text != nil else { return .exhausted }
+            remaining -= 1;return .more
+        }
+        var result: String? { complete ? parts.joined(separator:"\n") : nil }
+    }
+    static let continueAnswer = "Your answer reached its response limit. Continue exactly where it ended; do not repeat earlier text or omit unfinished requirements. Return only the remaining numbered sections. If this is the final part, finish the deliverable completely."
     static let maxToolRounds = 8
     /// Claude with tools. The tool handler runs natively and returns text. After `maxToolRounds` the tools are withdrawn so Claude must answer.
-    static func converse(_ prompt: String, model: String, apiKey: String, system: String, tools: [[String: Any]], isCancelled: @escaping () -> Bool, tool: @escaping (String, [String: Any], @escaping (String) -> Void) -> Void, completion: @escaping (String?) -> Void) {
+    static func converse(_ prompt: String, model: String, apiKey: String, system: String, images: [[String: Any]] = [], tools: [[String: Any]], isCancelled: @escaping () -> Bool, tool: @escaping (String, [String: Any], @escaping (String) -> Void) -> Void, diagnostic: ((String) -> Void)? = nil, maxTokens: Int = 4000, completion: @escaping (String?) -> Void) {
         let meterTag = TokenMeter.tag
-        var messages: [[String: Any]] = [["role": "user", "content": String(prompt.prefix(12000))]]
+        var pages = AnswerPages()
+        var messages: [[String: Any]] = [["role": "user", "content": [["type": "text", "text": PromptDelivery.envelope(prompt)]] + images]]
         func round(_ remaining: Int) {
             if isCancelled() { return }
             var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
@@ -75,17 +91,37 @@ enum ClaudeClient {
             request.timeoutInterval = 180
             request.setValue("application/json", forHTTPHeaderField: "content-type")
             authorize(&request, apiKey)
-            var body: [String: Any] = ["model": model, "max_tokens": 4000, "system": system, "messages": messages]
+            if supportsFallback(model) { request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta") }
+            var body: [String: Any] = ["model": model, "max_tokens": maxTokens, "system": system, "messages": messages]
             if remaining > 0 { body["tools"] = tools }
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-            URLSession.shared.dataTask(with: request) { data, response, _ in
+            BudgetHTTP.dataTask(with: request, seat: meterTag) { data, response, error in
                 TokenMeter.record(meterTag, model: model, data: data)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 let json = status == 200 ? data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } : nil
                 DispatchQueue.main.async {
                     if isCancelled() { return }
-                    guard let json, let blocks = json["content"] as? [[String: Any]] else { completion(nil); return }
+                    guard let json, let blocks = json["content"] as? [[String: Any]] else {
+                        let provider = data.flatMap { (try? JSONSerialization.jsonObject(with:$0)) as? [String:Any] }
+                        let message = (provider?["error"] as? [String:Any])?["message"] as? String ?? error?.localizedDescription ?? "Response contained no usable content."
+                        diagnostic?("Claude request failed (HTTP \(status)): " + String(message.replacingOccurrences(of:apiKey,with:"[redacted]").prefix(800)))
+                        completion(nil);return
+                    }
+                    if json["stop_reason"] as? String == "max_tokens" {
+                        guard toolUses(blocks).isEmpty, pages.append(searchReport(blocks),limited:true) == .more else { diagnostic?("Claude reached its response continuation limit or returned an incomplete tool request; no final result was accepted.");completion(nil);return }
+                        messages.append(["role":"assistant","content":blocks])
+                        messages.append(["role":"user","content":continueAnswer])
+                        round(remaining);return
+                    }
+                    if json["stop_reason"] as? String == "pause_turn" {
+                        guard remaining > 0 else { diagnostic?("Claude exhausted its tool/continuation budget before a final answer.");completion(nil);return }
+                        messages.append(["role": "assistant", "content": blocks])
+                        round(remaining - 1)
+                        return
+                    }
+                    if json["stop_reason"] as? String == "refusal" { diagnostic?("Claude declined the request; no completed result was returned.");completion(nil);return }
                     let calls = toolUses(blocks)
+                    if !calls.isEmpty && remaining == 0 { diagnostic?("Claude exhausted its tool-call budget with requests still pending; no completed result was returned.");completion(nil);return }
                     if json["stop_reason"] as? String == "tool_use", !calls.isEmpty, remaining > 0 {
                         messages.append(["role": "assistant", "content": blocks])
                         var results: [[String: Any]] = []
@@ -98,15 +134,16 @@ enum ClaudeClient {
                             }
                             let call = calls[index]
                             tool(call.name, call.input) { output in
-                                results.append(["type": "tool_result", "tool_use_id": call.id, "content": String(output.prefix(24000))])
+                                results.append(["type": "tool_result", "tool_use_id": call.id, "content": (output.count > 24000 ? String(output.prefix(24000)) + "\n[TOOL RESULT INCOMPLETE: only the first 24,000 characters were returned. Retrieve the remaining source with a narrower or paged tool call before claiming a full review.]" : output)])
                                 next(index + 1)
                             }
                         }
                         next(0)
                         return
                     }
-                    let joined = blocks.compactMap { $0["text"] as? String }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-                    completion(joined.isEmpty ? nil : joined)
+                    _ = pages.append(searchReport(blocks),limited:false)
+                    if pages.result == nil { diagnostic?("Claude returned no final answer text.") }
+                    completion(pages.result)
                 }
             }.resume()
         }
@@ -155,7 +192,8 @@ enum ClaudeClient {
     /// Completion gets the report, or nil plus a plain reason.
     static func research(_ prompt: String, model: String, apiKey: String, system: String, isCancelled: @escaping () -> Bool, completion: @escaping (String?, String?) -> Void) {
         let meterTag = TokenMeter.tag
-        var messages: [[String: Any]] = [["role": "user", "content": String(prompt.prefix(12000))]]
+        var pages = AnswerPages()
+        var messages: [[String: Any]] = [["role": "user", "content": PromptDelivery.envelope(prompt)]]
         func send(_ continuations: Int) {
             if isCancelled() { return }
             var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
@@ -165,7 +203,7 @@ enum ClaudeClient {
             authorize(&request, apiKey)
             if supportsFallback(model) { request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta") }
             request.httpBody = try? JSONSerialization.data(withJSONObject: searchBody(model: model, system: system, messages: messages))
-            URLSession.shared.dataTask(with: request) { data, response, _ in
+            BudgetHTTP.dataTask(with: request, seat: meterTag) { data, response, _ in
                 TokenMeter.record(meterTag, model: model, data: data)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
@@ -177,13 +215,19 @@ enum ClaudeClient {
                     }
                     switch json["stop_reason"] as? String {
                     case "refusal": completion(nil, "Claude declined this research request.")
+                    case "max_tokens" where continuations > 0:
+                        guard pages.append(searchReport(blocks),limited:true) == .more else { completion(nil,"Claude research response remains incomplete after its continuation limit.");return }
+                        messages.append(["role":"assistant","content":blocks]);messages.append(["role":"user","content":continueAnswer])
+                        send(continuations - 1)
+                    case "max_tokens" where continuations == 0, "pause_turn" where continuations == 0:
+                        completion(nil,"Claude research reached its continuation limit; the response is incomplete.")
                     case "pause_turn" where continuations > 0:
                         // Resend the history with the paused assistant turn; the server resumes the search by itself.
                         messages.append(["role": "assistant", "content": blocks])
                         send(continuations - 1)
                     default:
-                        let report = searchReport(blocks)
-                        completion(report, report == nil ? "Claude returned no research report." : nil)
+                        _ = pages.append(searchReport(blocks),limited:false)
+                        completion(pages.result, pages.result == nil ? "Claude returned no complete research report." : nil)
                     }
                 }
             }.resume()

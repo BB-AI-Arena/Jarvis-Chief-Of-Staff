@@ -86,53 +86,39 @@ class Presence {
       trace([[sign*.56,-.27],[sign*.44,-.55],[sign*.35,-.70]],seamMat);
     }
     trace([[0,.55],[0,.82],[0,1.04]],circuitMat);
-    // Flat photograph. Eyes, visor and the chin waveform are overlays, so the helmet is never warped.
+    // Keep the photographed helmet intact; only its silhouette belongs in the scene.
     if(window.JARVIS_PORTRAIT){
       this.head.clear();
       const texture=new THREE.TextureLoader().load(window.JARVIS_PORTRAIT,()=>{this.dirty=true});texture.colorSpace=THREE.SRGBColorSpace;
-      this.portraitMaterial=new THREE.ShaderMaterial({transparent:true,depthWrite:true,toneMapped:false,
+      this.portraitMaterial=new THREE.ShaderMaterial({transparent:true,depthWrite:false,toneMapped:false,
         uniforms:{portrait:{value:texture},fade:{value:0},energy:{value:0},time:{value:0},processing:{value:0},drift:{value:0}},
         vertexShader:'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
         fragmentShader:`uniform sampler2D portrait;uniform float fade;uniform float energy;uniform float time;uniform float processing;uniform float drift;varying vec2 vUv;
           float eyeGlow(vec2 c,vec2 r){vec2 d=(vUv-c)/r;return exp(-dot(d,d)*1.25);}
           void main(){
           vec3 c=texture2D(portrait,vUv).rgb;
-          float waveBox=(1.-smoothstep(.050,.060,abs(vUv.x-.500)))*(1.-smoothstep(.038,.046,abs(vUv.y-.303)));
-          c=mix(c,texture2D(portrait,vec2(vUv.x,.360)).rgb,waveBox);
-          float u=(vUv.x-.454)/.092;float inSpan=step(0.,u)*step(u,1.);
-          float f=fract(u*13.);float barX=smoothstep(.06,.20,f)*(1.-smoothstep(.46,.62,f));
-          float idx=floor(clamp(u,0.,.999)*13.);float shape=clamp(1.-abs(idx-6.)/6.,.12,1.);
-          float wobble=.60+.40*sin(time*(2.2+energy*8.)+idx*.9);
-          float amp=mix(.30,1.,clamp(energy,0.,1.));
-          float halfH=.005+.027*shape*wobble*amp;
-          float bar=barX*(1.-smoothstep(halfH,halfH+.0035,abs(vUv.y-.303)))*inSpan;
-          c+=vec3(.07,.48,.78)*bar*(.45+energy*1.7);
+          // Illuminate the waveform already in the photograph without painting a rectangular patch over the chin.
+          vec2 mouth=(vUv-vec2(.50,.303))/vec2(.065,.027);
+          c+=vec3(.025,.19,.28)*exp(-dot(mouth,mouth)*1.5)*energy;
           float eyes=eyeGlow(vec2(.375,.503),vec2(.062,.042))+eyeGlow(vec2(.626,.503),vec2(.062,.042));
           float breathe=.5+.5*sin(time*1.45);float pulse=processing*(.5+.5*sin(time*4.4));
           c+=vec3(.04,.28,.42)*eyes*(.22+breathe*.18+pulse*1.15);
           c+=c*eyes*pulse*.35;
           vec2 vis=(vUv-vec2(.50,.50))/vec2(.20,.105);float visor=exp(-dot(vis,vis)*1.35);
           c+=vec3(0.,.05,.08)*visor*(.08+energy*1.05+processing*.22);
-          vec2 helm=(vUv-vec2(.50,.50))/vec2(.42,.45);float outside=smoothstep(.98,1.35,dot(helm,helm));
-          vec2 gf=fract(vUv*vec2(20.,14.)+vec2(drift*.045,drift*.02));
-          float gd=min(min(gf.x,1.-gf.x),min(gf.y,1.-gf.y));
-          float grid=(1.-smoothstep(0.,.025,gd))*outside;
-          vec2 suv=vUv*vec2(17.,13.)+vec2(drift*.11,drift*.05);
-          vec2 cell=floor(suv);float n=fract(sin(dot(cell,vec2(127.1,311.7)))*43758.5453);
-          float speck=smoothstep(.08,0.,length(fract(suv)-.5-(n-.5)*.45))*step(.84,n);
-          speck*=.55+.45*sin(drift*1.6+n*6.28);
-          vec2 suv2=vUv*vec2(9.,7.)+vec2(-drift*.06,drift*.09);
-          vec2 cell2=floor(suv2);float n2=fract(sin(dot(cell2,vec2(269.5,183.3)))*43758.5453);
-          float speck2=smoothstep(.1,0.,length(fract(suv2)-.5-(n2-.5)*.4))*step(.88,n2);
-          float streak=exp(-pow((fract(vUv.y*3.-drift*.04)-.35)*7.,2.));
-          streak*=step(.55,fract(vUv.x*2.+drift*.01));
-          c+=vec3(.03,.22,.32)*(grid*.22+speck*.9+speck2*.55+streak*.18)*outside;
-          c*=mix(1.,1.+.02*sin(time*1.6),1.-outside);
-          float edge=smoothstep(0.,.07,vUv.x)*smoothstep(0.,.07,1.-vUv.x)*smoothstep(0.,.05,vUv.y)*smoothstep(0.,.05,1.-vUv.y);
-          gl_FragColor=vec4(c,edge*fade);
+          // The JPEG has an opaque square backdrop. Follow the helmet's domed top and tapered chin.
+          float y=vUv.y;
+          float crown=.31*sqrt(max(0.,1.-pow((y-.58)/.38,2.)));
+          float chin=.31*pow(clamp((y-.09)/.49,0.,1.),.53);
+          float halfWidth=y>.58?crown:chin;
+          float silhouette=1.-smoothstep(halfWidth-.020,halfWidth-.004,abs(vUv.x-.50));
+          silhouette*=smoothstep(.085,.105,y)*(1.-smoothstep(.945,.965,y));
+          gl_FragColor=vec4(c,silhouette*fade);
           #include <colorspace_fragment>
           }`});
-      this.head.add(new THREE.Mesh(new THREE.PlaneGeometry(2.85,2.85),this.portraitMaterial));
+      const portrait=new THREE.Mesh(new THREE.PlaneGeometry(2.85,2.85),this.portraitMaterial);
+      portrait.position.z=.9; // In front of the orb particles, with transparent pixels showing the scene.
+      this.head.add(portrait);
       this.head.position.y=.02;
     }
     const count=small?700:2400,positions=new Float32Array(count*3),targets=new Float32Array(count*3),colors=new Float32Array(count*3);

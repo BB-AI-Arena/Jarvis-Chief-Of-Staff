@@ -54,6 +54,7 @@ enum HealthCheck {
             else if let text = json["message"] as? String { message = text }
         }
         message = message.replacingOccurrences(of: "(sk|xai|key|crsr)[-_][A-Za-z0-9_-]{8,}", with: "[redacted]", options: .regularExpression)
+        if status == -1 { return message.isEmpty ? SpendBudget.blocked : message }
         return "HTTP \(status)" + (message.isEmpty ? "" : ": " + String(message.prefix(160)))
     }
     static func claudeText(_ data: Data) -> String? {
@@ -76,12 +77,20 @@ enum HealthCheck {
 
     private static func call(_ request: URLRequest, done: @escaping (Int, Data?, Int) -> Void) {
         let start = Date()
-        URLSession.shared.dataTask(with: request) { data, response, _ in
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let seat: String? = request.httpMethod == "POST" ?
+            (request.url?.host == "api.anthropic.com" ? "technology" : request.url?.host == "api.x.ai" ? "research" : nil) : nil
+        let callback: (Data?, URLResponse?, Error?) -> Void = { data, response, error in
+            let budgetDenied = (error as NSError?)?.domain == "JarvisBudget"
+            let status = budgetDenied ? -1 : ((response as? HTTPURLResponse)?.statusCode ?? 0)
+            let detail = budgetDenied ? try? JSONSerialization.data(withJSONObject: ["error":["message":error!.localizedDescription]]) : data
             let ms = Int(Date().timeIntervalSince(start) * 1000)
-            DispatchQueue.main.async { done(status, data, ms) }
-        }.resume()
+            DispatchQueue.main.async { done(status, detail, ms) }
+        }
+        let task = seat == nil ? URLSession.shared.dataTask(with: request, completionHandler: callback)
+            : BudgetHTTP.dataTask(with: request, seat: seat, completionHandler: callback)
+        task.resume()
     }
+
     private static func request(_ url: String, method: String = "GET", headers: [String: String], body: [String: Any]? = nil, timeout: TimeInterval = 60) -> URLRequest {
         var request = URLRequest(url: URL(string: url)!)
         request.httpMethod = method
@@ -148,10 +157,9 @@ enum HealthCheck {
 
         // Video: the 4090's ComfyUI is checked for reachability only; rendering a test clip would take minutes.
         ComfyVideo.reachable(settings.comfyServer) { up in
-            let grokNote = GrokCredential.read() == nil ? "" : "; Grok Imagine renders meanwhile"
             if up && settings.comfyWorkflowReady { finish(HealthResult(id: "video", name: "Video (4090 ComfyUI)", status: "ok", detail: "ComfyUI answering at \(settings.comfyServer) · workflow ready", ms: 0)) }
-            else if up { finish(HealthResult(id: "video", name: "Video (4090 ComfyUI)", status: "configured", detail: "ComfyUI answering, but no workflow saved in Jarvis Workspace/Video" + grokNote, ms: 0)) }
-            else { finish(HealthResult(id: "video", name: "Video (4090 ComfyUI)", status: "off", detail: "ComfyUI not reachable at \(settings.comfyServer)" + grokNote, ms: 0)) }
+            else if up { finish(HealthResult(id: "video", name: "Video (4090 ComfyUI)", status: "configured", detail: "ComfyUI answering; save a workflow in Jarvis Workspace/Video to enable local video", ms: 0)) }
+            else { finish(HealthResult(id: "video", name: "Video (4090 ComfyUI)", status: "off", detail: "ComfyUI not reachable at \(settings.comfyServer); local video waits for DARK", ms: 0)) }
         }
 
         // DARK over SSH: proves the key works and reads the 4090's live state.

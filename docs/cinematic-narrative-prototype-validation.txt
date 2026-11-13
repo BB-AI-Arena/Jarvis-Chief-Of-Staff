@@ -1,0 +1,196 @@
+Cinematic narrative prototype — November 11, 2026 (America/Chicago)
+
+Owner's goal: cinematic films that follow commands and stories, using artwork as visual reference.
+Test story: Drop Assassin comes to life and uses the app to find chase items.
+Authorization: one paid test, up to $3, no automatic generation retries.
+
+One reference-to-video generation request completed. No first frame was pinned.
+Model: grok-imagine-video-1.5, 720p, 16:9, 15 seconds requested.
+Estimated generation cost: 15 * $0.14 + 3 * $0.01 = $2.13. Actual invoice cost not independently checked.
+API references:
+https://docs.x.ai/developers/model-capabilities/video/reference-to-video
+https://docs.x.ai/developers/pricing
+
+References: DropAssassinIcon.png (hero identity), drop-assassin-logo.png (app/phone visual language), luffy-chase.png (target collectible), all from the owner's DARK artwork directory.
+Film: /Users/vader/Documents/Jarvis Workspace/Video/film-prototype/film.mp4
+Observed metadata: duration 15.042 seconds, one audio track. Audio quality was not separately reviewed.
+Frames reviewed at 2.5, 7.5 and 12.5 seconds show a consistent masked, black-and-gold hooded protagonist, an app screen showing the target, and a matching physical collectible being picked up. This demonstrates the requested story progression. It is not a certification of Hollywood-level quality; owner creative review remains necessary.
+
+The prototype is a separate bounded tool. Paid reference generation has not been enabled automatically in the installed Jarvis app. Native pipeline integration and an ongoing budget policy remain to be agreed after reviewing the draft.
+
+Engineering foundations implemented and committed: labelled reference-image previews for Claude's director, concepts and per-shot purposes/reference choices, exact-duration validation, refusal to generate a generic slideshow when story planning fails, full assignment briefs persisted separately from short task titles, opt-in reference-to-video request shape.
+
+
+Treatment
+USER STORY
+Drop Assassin comes to life and uses the app to find chase items.
+
+DIRECTOR'S TREATMENT
+Create one coherent 15-second cinematic CG short with three purposeful shots. The user's story is: Drop Assassin comes to life and uses the app to find chase items.
+Treat the images as character/object design references for NEW scenes. This is a little film with cause and effect. Maintain the same protagonist, clothes, phone and target collectible throughout.
+<IMAGE_0>: Use ONLY the central hooded, masked Drop Assassin figure as the recurring protagonist's design reference. Preserve his black hood, angular mask, gold eyes and gold/red accents. Depict him as one consistent fully realized cinematic CG character with a body, interacting physically with his world. The surrounding poster composition and other figures are not the scene.
+<IMAGE_1>: Reference for Drop Assassin's visual identity and the phone/app look. Use its app/phone visual language as a reference for the phone he actually holds and operates. Do not turn the story into a logo or product montage.
+<IMAGE_2>: The chase collectible he is searching for. Preserve that collectible's design so the object he finds matches the one he first sees in the app.
+0–5s — THE AWAKENING. In a dark, cinematic collector's room, gold eyes ignite within the hood. The real three-dimensional Drop Assassin character steps out of the shadows into a pool of warm light. Begin close on his eyes, then reveal his full physical presence. Tactile cloth, polished mask edges, motivated lighting. His phone pulses in his hand; his attention turns to it. No animated poster, no floating logos.
+5–10s — THE LEAD. Cut over the same character's shoulder to his hand opening the Drop Assassin app on the same phone. A visual card of the target chase collectible from <IMAGE_2> appears as a find/lead. No dependence on readable tiny text. His thumb selects the lead; his head turns decisively toward a nearby illuminated collector's display. Make the phone interaction the cause of his next action. A short notification ping connects the cut.
+10–15s — THE FIND. Follow the SAME character's purposeful move to that display. He reaches past ordinary boxed collectibles and reveals the matching rare chase collectible from <IMAGE_2>, lifting it for a satisfying close-up. End on the same gold-eyed hooded figure holding the found item, phone still in his other hand, the app and the physical find visibly connected. End the story here; do not replace the ending with a brand slate.
+One coherent cinematic score: quiet low pulse on awakening, a crisp phone notification and rising momentum on the lead, then one satisfying resolved hit on the find. Cloth, footsteps and handling sounds; no dialogue or narration. High-end cinematic CG lighting, deliberate framing, physical action, coherent spatial continuity, stable character identity. No extra characters, no random spectacle, no collage or generic Ken Burns slideshow.
+
+REFERENCES
+/home/bradshaw/services/collectibles-alert-engine/artwork/DropAssassinIcon.png
+/home/bradshaw/services/collectibles-alert-engine/artwork/drop-assassin-logo.png
+/home/bradshaw/services/collectibles-alert-engine/artwork/luffy-chase.png
+
+Estimated single request: 15 × $0.14 + 3 × $0.01 = $2.13. Maximum authorized budget required: $3. No automatic generation retries.
+
+Live visual-planner output
+Creative received 3 labelled artwork previews
+# Drop Assassin: The Hunt
+
+Concept: The hooded figure on the artwork wakes in the dark, then opens the phone app and reads the market data, and finally hunts down and claims a glowing chase Funko, so the story moves from awakening to the search to the catch.
+
+Brief: User story: Drop Assassin comes to life and uses the app to find chase items
+
+Rendered on: 4090 · ComfyUI (free)
+
+## Shots
+
+Beat: Hook: Drop Assassin comes to life
+1. 5 s — not rendered
+   Pitch-black space. The hooded figure from the artwork, in a black hood and face wrap with glowing gold eyes, appears out of the shadows as a fully realized live-action-style character. His hood and gold-trimmed edges catch a thin red rim light. The eyes ignite first, then his chest draws a slow breath and his shoulders rise as he comes alive. Red and gold sparks drift past him. A low-angle, slightly handheld medium shot pushes in only slightly, then he lifts his head and turns toward the camera. The setting is a dim sneaker-shop backroom, with shoeboxes, display shelves and trading cards faintly visible in the dark. No readable text or logo. Sound: a low heartbeat-like sub pulse, a soft breath and the rustle of fabric, with a gold shimmer on the eye ignition.
+Beat: Development: he uses the app to search for chase items
+2. 5 s — not rendered
+   Close over-the-shoulder shot, then a cut to a tight profile view. The same hooded figure holds up a black-and-gold smartphone like the one in the artwork. Its screen glows gold and shows an upward market chart and rows of listings, with no legible text. The light plays across his gold eyes. His thumb scrolls and a marker pings on a map of the area. His eyes narrow. He snaps the phone down, and the camera whips from the screen to his determined look, then follows him as he moves quickly out of the room into a rain-slick night street with neon reflections. Sound: soft UI taps and rising digital pings, then an accelerating pulse as he starts to move, footsteps on wet pavement.
+Beat: Payoff: he finds and claims the chase item
+3. 5 s — not rendered
+   Wide low tracking shot down a dark alley as the hooded figure slides to a stop. At the end, on a small pedestal in a pool of light, sits the glowing chase Funko of the curly-haired character in a dynamic running pose with blue glowing energy wisps, as in the reference. Cut to a close-up of the figure's gloved hand reaching in, and the blue glow reflects on his gold eyes. Cut to the hand lifting the figure from the pedestal, then a final medium shot with the hooded protagonist holding the chase Funko up in front of him, blue light on his hood, and a faint gold smirk in his eyes. The shot holds on the capture, with no logo card. Sound: the pulse drops to near silence, a swell of blue shimmering energy as he grasps it, then one deep resolving hit and a bright chime on the final hold.
+
+
+
+Artwork references (actual image conditioning, SHA-256 of source bytes):
+- Shot 1: /home/bradshaw/services/collectibles-alert-engine/artwork/DropAssassinIcon.png · sha256 dd394e400e0275ad806902357a63f49f7b109281937fd30eafa6eab98e8c9d8e · ComfyUI input jarvis-artwork-dd394e400e0275ad806902357a63f49f7b109281937fd30eafa6eab98e8c9d8e-1280x704.png
+- Shot 2: /home/bradshaw/services/collectibles-alert-engine/artwork/DropAssassinIcon.png · sha256 dd394e400e0275ad806902357a63f49f7b109281937fd30eafa6eab98e8c9d8e · ComfyUI input jarvis-artwork-dd394e400e0275ad806902357a63f49f7b109281937fd30eafa6eab98e8c9d8e-1280x704.png
+- Shot 3: /home/bradshaw/services/collectibles-alert-engine/artwork/luffy-chase.png · sha256 317824cb63d99c59fb3beb7c6d21090d9980a405dd986ea4d184cab68da31872 · ComfyUI input jarvis-artwork-317824cb63d99c59fb3beb7c6d21090d9980a405dd986ea4d184cab68da31872-1280x704.png
+PASS vision-grounded concept and 3 deliberate beats totalling 15 seconds
+
+Checks (104 PASS lines)
+PASS: voice requests route without a model hand-off, retain transcript fragments, and deduplicate delayed delegations across turns
+PASS: real CloudVoice event handling dispatches missing, explicit, delayed and typed hand-offs exactly once without microphone or network
+[0/1] Planning build
+Building for production...
+[0/3] Write sources
+[1/3] Write swift-version--1AB21518FC5DEDBE.txt
+[3/4] Compiling Jarvis Acceptance.swift
+[3/5] Write Objects.LinkFileList
+[4/5] Linking Jarvis
+Build complete! (21.74s)
+PASS: silence alone never sends an empty model request
+PASS: a short thinking pause does not submit early
+PASS: ongoing speech postpones turn completion even without new recognition text
+PASS: a completed spoken turn submits automatically after silence
+PASS: final callback cannot submit the same turn a second time
+PASS: recognizer callbacks outside the listening phase cannot become a new turn
+PASS: ending the conversation discards pending microphone text
+PASS: a recognizer final result can end a turn without an extra delay
+PASS: whitespace transcripts do not send requests
+PASS: plain and fenced routing accepted; malformed, unknown and empty instructions rejected
+PASS: Jarvis never executes; work is assigned to a director, and an unverified manager id stays unset
+PASS: a suggested task is never an assignment; it needs approval before it reaches the ledger
+PASS: Luna's routing schema is strict (every property required, optional ones nullable) and null directors fall back to classify
+PASS: Jarvis can route a request to a board debate; the question comes from task, and debates are never assignments
+PASS: video requests go to the Creative Director
+PASS: blocked results offer no follow-up (no approval loops), and requests to change Jarvis himself go to Operations
+PASS: assignments preserve actual work and reject acknowledgements; routing declares director limits
+PASS: silent streaming audio stays listening; audible speech holds through short gaps
+PASS: task ledger round-trips, and a running task relaunch is interrupted
+PASS: director work keeps a parent id, and Jarvis is not the owner
+PASS: each director's queue starts the oldest queued task; legacy waiting, unassigned, running and child rows never auto-start
+PASS: a spoken result is one clean sentence without markdown
+PASS: full story briefs survive ledger persistence without being truncated to the display title
+PASS: Claude model id defaults to the current Sonnet API id and rejects malformed ids
+PASS: Claude tool_use blocks are parsed into id, name and brief; text-only replies have no tool calls
+PASS: the CTO's tool calls carry their full input, with a bounded number of rounds
+PASS: Research can fall back to Claude with live web search, keeping the answer and its cited sources
+PASS: Grok defaults to the documented xAI model id, rejects malformed ids, and reads only real completions
+PASS: Research asks xAI for live web search and keeps the answer with its cited sources
+PASS: Grok's tool calls are read from the Responses API so Research can use DARK while searching the web
+PASS: research depth, tool limits, DARK relevance and daily seat token usage
+PASS: Projects validates full input, supports three tool schemas, caps delegations and cancels timed-out work exactly once
+PASS: Cursor cloud agents launch with the persona brief on a validated https repo and read only documented run states
+PASS: debate prompts carry the question, the round and every earlier turn
+PASS: the chair verdict is read only from real JSON with a boolean and a decision
+PASS: debate turns become clean single bubble lines without name prefixes or markdown
+PASS: the task list records the outcome honestly, the chair model, and the full transcript
+PASS: Jarvis acknowledges who is debating and announces the verdict, or says plainly when there is none
+PASS: the Projects seat sends a local Ollama chat body and reads only real replies
+PASS: Projects talks to the 4090's Ollama by default and only accepts local-network model servers
+PASS: Creative recognises video requests and their length, capped at 60 seconds
+PASS: shot lists are read from the planner's JSON and clamped to the requested length and each renderer's clip limit
+PASS: the shot list document records the renderer, cost and each shot's outcome
+PASS: Grok Imagine requests use the documented fields, and finished, failed and malformed replies are told apart
+PASS: the 4090's ComfyUI workflow gets the shot's prompt, frame count and seed, and the rendered video file is found in its history
+PASS: DARK is reached over SSH with Jarvis's own key only (no password, no agent forwarding), and bad settings fall back to safe defaults
+PASS: spoken lengths like "thirty-second" are read as numbers
+PASS: the Studio card's progress comes from real stages, ComfyUI nodes and sampler steps
+PASS: ComfyUI's websocket events are read per job and other messages are ignored
+PASS: directors can run commands on DARK through Jarvis; deleting, sudo, reboots, firewall, user and SSH key changes are refused before anything runs
+PASS: artwork uses real image conditioning, rewires latent and guider, records source hashes and refuses incompatible workflows
+PASS: artwork storyboards preserve concept, distinct shot purposes, exact timing and deliberate source choices; invalid plans cannot fall back to slideshows
+PASS: narrative planning preserves the user's story and reference-to-video does not pin the opening frame or request unsupported 1080p
+PASS: the Keychain helper only touches Jarvis's own entries and never takes a key from its arguments
+PASS: the fast router sends the shared rules, memory and a forced route tool to a small Claude model
+PASS: router replies are validated like every other brain; Jarvis is never a director and unknown routes are dropped
+PASS: router keeps task separate from speech and defaults to no follow-up
+PASS: board memory appends dated one-line entries and recalls the most recent ones as context
+PASS: the CTO's tools are read-only, stay inside the workspace and source folders, and never expose secrets, hidden or dependency files
+PASS: the acceptance run fails a request that is refused, lost, or sent to the wrong director
+PASS: video artwork verification cannot pass acceptance when assigned to Research
+PASS: health failures show the HTTP status and provider message, with any key-shaped text redacted
+PASS: health results read real replies and print one key-free line per connection
+PASS: the headless health check reads the same saved seat settings as the app
+PASS: at launch Jarvis names what is disconnected or not answering, and stays quiet when all is well
+PASS: every board persona and the charter are bundled and loadable
+PASS: UI updates apply in place from the source page, skip broken scripts, and never outlive a newer installed build
+PASS: results play inside Jarvis from the Results folder only, with seeking
+PASS: tokens are read from each provider's reply and charged to the director whose work made the call
+
+> jarvis-chief-of-staff@0.4.0 test
+> node tests/check_conversation.cjs && node tests/check_live.cjs
+
+PASS: spoken replies default on
+PASS: the prominent face stays active through every conversation phase
+PASS: silence-completed voice turn sends automatically, without Enter or Send
+PASS: a conversational reply speaks once in Lewis, even if typed replies were muted
+PASS: interruption is available while Jarvis answers
+PASS: stopped conversations cannot dispatch late microphone turns
+PASS: floating orb never duplicates chat requests or spoken replies
+PASS: actual audio time selects closed lips and rounded vowels; idle releases the mouth
+PASS: Luna selection honors API streaming voice after a key is saved
+PASS: streaming microphone meter reports captured input and hides when stopped
+PASS: the board names each director, keeps voice preview, and marks unconnected seats
+PASS: the Operations manager stays unset until a verified model is saved
+PASS: the CTO seat stays disconnected until Claude reports a successful check
+PASS: active and recent tasks render, and Stop targets the running task
+PASS: the boardroom layers each director separately with its own idle timing and a settings popover
+PASS: the boardroom table shows the task list with Stop on running work
+PASS: debate playback animates turns in order, then the agreement beat; the demo is labelled as a demo
+PASS: the Research seat shows Grok only after xAI confirms the key, and its model is configurable
+PASS: the Creative Director runs on Cursor cloud agents with a configurable repository and model
+PASS: suggested tasks wait for approval; only Approve sends them to the task list
+PASS: a live debate is convened by topic, plays each model round as it arrives, and ends on the chair verdict
+PASS: the page speaks the verdict only when no live voice session is relaying it
+PASS: Settings runs the health check and shows each connection as ok, failed or off with its detail
+PASS: the task list lets you assign an unrouted request, remove a queued one, and open a saved result
+PASS: Jarvis speaks a finished result on the page when no live voice is relaying it
+PASS: with Grok off, the Research seat shows Claude standing in, and its tasks stay labelled Research
+PASS: the Projects seat runs on a chosen local Ollama model and its tasks are labelled Projects
+PASS: a hand-off flies from Jarvis to the director, who lights up as working on the board and the home strip
+PASS: the Studio card shows each shot, the sampler step and the 4090 live, and plays the finished video
+PASS: clicking a director shows what it is doing, its tasks with results, and its tokens by model
+PASS: results open inside Jarvis: the video plays with shot picks, and the document reads safely
+PASS: Settings can reload the UI from source, and the page may play result media
+PASS: artwork honors explicit filenames, prioritizes brand assets, excludes hidden files and symlinks, and rejects missing references
+
+Single paid generation output
+Submitting exactly one 15-second reference-to-video request with 3 images. Estimated $2.13. No retry.
+RENDERED draft for review: /Users/vader/Documents/Jarvis Workspace/Video/film-prototype/film.mp4

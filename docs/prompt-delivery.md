@@ -1,0 +1,11 @@
+# Prompt delivery and model limits
+
+Jarvis preserves the current user request and saves the full task brief independently from short display titles. Every execution path reads `TaskRecord.instructions`, which falls back to the title only for legacy records without a brief. Router decisions and approved suggestions no longer impose 500/2,000/12,000-character command cutoffs. Failed routing preserves the full request for subsequent assignment. Results return the complete saved document.
+
+`PromptDelivery` uses 50,000-character content parts, split on Swift Character boundaries. Longer assignments retain all parts in one numbered packet, with a count and an end marker. The current transports submit this packet together; numbering does not increase a provider's context window or imply separate API calls. Director policies require scoped multi-prompt passes, requirements tracking and synthesis when needed, within existing budgets and approval rules.
+
+Claude tool-backed assignments automatically continue a `max_tokens` answer with retained conversation history, for up to three additional requests. Partial pages become a complete result only when the final response finishes normally. Claude research also supports bounded continuation. Incomplete Grok and Ollama responses are rejected rather than reported as complete. Long tool excerpts carry an explicit incomplete-source notice directing the model to request remaining material.
+
+Local model context is sized conservatively from serialized UTF-8 input, with output/template headroom and model-specific ceilings. Model metadata queried on this Mac and DARK confirmed 131,072 tokens for gemma4 and 262,144 for qwen3.5. Other models retain the conservative 8,192-token allowance. Byte counts are safety bounds, not exact token estimates. Actual provider limits, available memory, timeouts and token budgets still apply. Requests that cannot fit are preserved and surfaced rather than silently sliced.
+
+Tests cover Unicode round trips across 50,000-character boundaries, long router/director payloads, persisted full instructions, local context growth, incomplete outputs, and actual HTTP-stubbed continuation requests including bounded exhaustion. No real API keys or external model calls are used in those tests. The existing owner story-approval gate remains required before film generation.

@@ -25,8 +25,12 @@ struct GrokVideo: ShotRenderer {
     var model = VideoPlan.grokModel
     var resolution = "1080p"
     var aspect = "16:9"
-    static func body(_ shot: VideoPlan.Shot, model: String, resolution: String, aspect: String) -> [String: Any] {
-        ["model": model, "prompt": shot.prompt, "duration": shot.seconds, "resolution": resolution, "aspect_ratio": aspect]
+    /// Reference-to-video guides subjects without fixing the opening frame. Kept opt-in by callers.
+    var referenceImages: [String] = []
+    static func body(_ shot: VideoPlan.Shot, model: String, resolution: String, aspect: String, referenceImages: [String] = []) -> [String: Any] {
+        var body: [String: Any] = ["model": model, "prompt": shot.prompt, "duration": shot.seconds, "resolution": referenceImages.isEmpty ? resolution : "720p", "aspect_ratio": aspect]
+        if !referenceImages.isEmpty { body["reference_images"] = referenceImages.prefix(14).map { ["url": $0] } }
+        return body
     }
     /// (status, video URL, error message) from a poll response.
     static func poll(_ data: Data) -> (status: String, url: URL?, error: String?)? {
@@ -47,7 +51,7 @@ struct GrokVideo: ShotRenderer {
         return request
     }
     func render(_ shot: VideoPlan.Shot, to file: URL, isCancelled: @escaping () -> Bool, completion: @escaping (URL?, String?) -> Void) {
-        URLSession.shared.dataTask(with: request("/videos/generations", body: GrokVideo.body(shot, model: model, resolution: resolution, aspect: aspect))) { data, response, _ in
+        BudgetHTTP.dataTask(with: request("/videos/generations", body: GrokVideo.body(shot, model: model, resolution: resolution, aspect: aspect, referenceImages: referenceImages)), seat: "creative") { data, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             guard status == 200, let id = json?["request_id"] as? String else {
@@ -86,6 +90,8 @@ struct ComfyVideo: ShotRenderer {
     let workflow: [String: Any]
     /// ComfyUI sends live progress over its websocket to this client id (see ComfyMonitor).
     var clientID = "jarvis"
+    var artwork: [VideoArtwork.Reference] = []
+    var artworkIndex = 0
     /// Called on the main queue with the shot's ComfyUI prompt id once the job is queued.
     var onQueued: ((String) -> Void)? = nil
     static let defaultServer = "http://192.168.4.31:8188"
@@ -115,7 +121,14 @@ struct ComfyVideo: ShotRenderer {
         }.resume()
     }
     func render(_ shot: VideoPlan.Shot, to file: URL, isCancelled: @escaping () -> Bool, completion: @escaping (URL?, String?) -> Void) {
-        let filled = VideoPlan.fill(workflow, prompt: shot.prompt, frames: VideoPlan.frames(seconds: shot.seconds, fps: VideoPlan.fps(in: workflow)), seconds: shot.seconds, seed: Int.random(in: 1...999_999_999))
+        let graph: [String: Any]
+        if !artwork.isEmpty {
+            guard let conditioned = VideoArtwork.conditioned(workflow, image: artwork[artworkIndex % artwork.count].image) else {
+                completion(nil, "The ComfyUI workflow does not support artwork conditioning. No text-only fallback was used."); return
+            }
+            graph = conditioned
+        } else { graph = workflow }
+        let filled = VideoPlan.fill(graph, prompt: shot.prompt, frames: VideoPlan.frames(seconds: shot.seconds, fps: VideoPlan.fps(in: workflow)), seconds: shot.seconds, seed: Int.random(in: 1...999_999_999))
         var request = URLRequest(url: URL(string: server + "/prompt")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 30

@@ -6,10 +6,16 @@ enum VideoPlan {
     struct Shot: Equatable {
         let prompt: String
         let seconds: Int
+        var referenceIndex: Int? = nil
+        var purpose: String? = nil
+        var imagePrompt: String? = nil
+        var referenceIndices: [Int]? = nil
     }
     struct Plan: Equatable {
         let title: String
         let shots: [Shot]
+        var concept: String? = nil
+        var continuity: String? = nil
         var seconds: Int { shots.reduce(0) { $0 + $1.seconds } }
     }
     /// Where a shot is rendered.
@@ -22,13 +28,17 @@ enum VideoPlan {
         var dollarsPerSecond: Double { self == .comfy ? 0 : 0.08 }
     }
     static let grokModel = "grok-imagine-video-1.5"
-    /// A hard ceiling so one request cannot run up a large bill (60 s on Grok is about $4.80).
-    static let maxTotalSeconds = 60
-    static let maxShots = 12
+    /// Local films are bounded to ten minutes; cloud generation is not used by the local worker.
+    static let maxTotalSeconds = 600
+    static let maxShots = 120
 
     /// True when a Creative task asks for moving pictures rather than code, copy or a design file.
     static func isVideoRequest(_ text: String) -> Bool {
         let lower = text.lowercased()
+        let opening = String(lower.split(separator:"\n",maxSplits:1).first ?? "")
+        let writing = ["script", "screenplay", "storyline", "storyboard"].contains { opening.contains($0) }
+        let explicitProduction = opening.range(of:"\\b(render|animate|produce)\\b",options:.regularExpression) != nil || opening.range(of:"\\b(make|create)\\b.{0,50}\\b(video|film|movie|trailer)\\b",options:.regularExpression) != nil
+        if writing && !explicitProduction { return false }
         let words = ["video", "trailer", "teaser", "commercial", "promo clip", "film ", "movie", "animation", "animated", "b-roll", "cinematic clip", "short clip", "reel", "footage"]
         return words.contains { lower.contains($0) }
     }
@@ -37,9 +47,9 @@ enum VideoPlan {
         let lower = numbersAsDigits(text.lowercased())
         if let match = lower.range(of: "([0-9]{1,3})\\s*-?\\s*(seconds?|secs?|s\\b)", options: .regularExpression),
            let number = Int(lower[match].prefix { $0.isNumber }) { return min(max(number, 3), maxTotalSeconds) }
-        if let match = lower.range(of: "([0-9])\\s*-?\\s*minutes?", options: .regularExpression),
-           let number = Int(lower[match].prefix { $0.isNumber }) { return min(number * 60, maxTotalSeconds) }
-        if lower.contains("a minute") || lower.contains("one minute") { return maxTotalSeconds }
+        if let match = lower.range(of: "([0-9]{1,3})\\s*-?\\s*minutes?", options: .regularExpression),
+           let number = Int(lower[match].prefix { $0.isNumber }) { return min(max(number * 60, 3), maxTotalSeconds) }
+        if lower.contains("a minute") || lower.contains("one minute") { return 60 }
         return 15
     }
     /// "thirty-second" → "30-second", "forty five seconds" → "45 seconds". Voice transcripts spell numbers out.
@@ -78,12 +88,12 @@ enum VideoPlan {
             let asked = (item["seconds"] as? Int) ?? (item["seconds"] as? Double).map { Int($0.rounded()) } ?? renderer.maxShotSeconds
             let seconds = min(max(asked, 1), renderer.maxShotSeconds, max(total, 1) - used)
             guard seconds >= 1 else { break }
-            shots.append(Shot(prompt: String(prompt.prefix(2000)), seconds: seconds))
+            shots.append(Shot(prompt: String(prompt.prefix(2000)), seconds: seconds, referenceIndex: item["reference_index"] as? Int, purpose: item["purpose"] as? String, imagePrompt: item["image_prompt"] as? String, referenceIndices: item["reference_indices"] as? [Int]))
             used += seconds
         }
         guard !shots.isEmpty else { return nil }
         let title = ((json["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : String($0.prefix(80)) } ?? "Video"
-        return Plan(title: title, shots: shots)
+        return Plan(title: title, shots: shots, concept: json["concept"] as? String, continuity: json["continuity"] as? String)
     }
     /// When no planner answers: the brief itself, split into equal shots.
     static func fallback(brief: String, total: Int, renderer: Renderer) -> Plan {
@@ -102,7 +112,9 @@ enum VideoPlan {
     /// The shot list document saved next to the clips.
     static func document(_ plan: Plan, brief: String, renderer: Renderer, results: [String]) -> String {
         var lines = ["# \(plan.title)", "", "Brief: \(brief)", "", "Rendered on: \(renderer.rawValue)" + (renderer == .grok ? " (\(grokModel), 1080p, about $\(String(format: "%.2f", cost(plan, renderer: renderer))))" : " (free)"), "", "## Shots", ""]
+        if let concept = plan.concept { lines.insert(contentsOf: ["Concept: " + concept, ""], at: 2) }
         for (index, shot) in plan.shots.enumerated() {
+            if let purpose = shot.purpose { lines.append("Beat: " + purpose) }
             lines.append("\(index + 1). \(shot.seconds) s — \(index < results.count ? results[index] : "not rendered")")
             lines.append("   " + shot.prompt)
         }
@@ -117,6 +129,7 @@ enum VideoPlan {
         struct ShotState {
             var prompt: String
             var seconds: Int
+            var pipelinePhase = "video"
             var state = "queued"          // queued, rendering, downloading, done, failed
             var activity = ""             // "loading models", "diffusing", …
             var step = 0, steps = 0
@@ -139,6 +152,14 @@ enum VideoPlan {
             shots = plan.shots.map { ShotState(prompt: $0.prompt, seconds: $0.seconds) }
             stage = .rendering
         }
+        /// A long film can direct its opening before later shots are written. Keep completed work visible.
+        mutating func loadDirected(_ plan: Plan, total: Int) {
+            let previous = shots
+            load(plan)
+            for i in shots.indices where previous.indices.contains(i) && previous[i].prompt == shots[i].prompt && previous[i].seconds == shots[i].seconds { shots[i] = previous[i] }
+            var remaining = max(0, total - plan.seconds)
+            while remaining > 0 { let seconds = min(5, remaining);shots.append(ShotState(prompt: "Waiting for scene direction", seconds: seconds));remaining -= seconds }
+        }
         var headline: String {
             switch stage {
             case .choosing: return "Choosing where to render"
@@ -158,6 +179,12 @@ enum VideoPlan {
         }
         /// 0–100 for one shot: ComfyUI's real step count while diffusing; fixed points for the other phases.
         static func percent(_ shot: ShotState) -> Int {
+            if shot.state != "done" {
+                if shot.pipelinePhase == "scene_ready" { return 20 }
+                if shot.pipelinePhase == "scene" { return shot.steps > 0 ? 3 + Int(15.0 * Double(shot.step) / Double(shot.steps)) : 3 }
+                if shot.pipelinePhase == "review" { return 92 }
+                if shot.pipelinePhase == "film_video" { return shot.steps > 0 ? 20 + Int(65.0 * Double(shot.step) / Double(shot.steps)) : 20 }
+            }
             switch shot.state {
             case "done": return 100
             case "downloading": return 97

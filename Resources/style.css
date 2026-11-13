@@ -11,7 +11,7 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .seat .seat-status{margin:2px 0 6px;color:#89a8bd;font-size:10px;line-height:1.3;min-height:0}
 .seat select{width:100%;padding:7px;background:#102435;border:1px solid #3d6d86;border-radius:8px;color:inherit}
 .seat button{margin-top:8px;font-size:11px;color:#b7ecff}
-.task-panel{margin:8px 0 0;padding:12px 14px;border:1px solid #6fdfff33;border-radius:14px;background:#0c1a28cc;max-height:220px;overflow:auto}
+.task-panel{margin:8px 0 0;padding:12px 14px;border:1px solid #6fdfff33;border-radius:14px;background:#0c1a28cc;max-height:min(360px,40vh);min-height:0;overflow:auto;scrollbar-color:#5b9eba #0c1a28}
 .task-panel h3{margin:8px 0 4px;font-size:11px;font-weight:500;color:#8fb4c8;letter-spacing:.08em}
 .task-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:6px 0;border-top:1px solid #2a4d6233}
 .task-row strong{display:block;font-weight:500;font-size:13px}
@@ -28,24 +28,23 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .seat .figure{position:absolute;left:var(--x);bottom:var(--b);height:var(--h);transform:translateX(-50%) rotate(var(--lean,0deg)) translateX(var(--leanx,0%));transform-origin:50% 100%;transition:transform .7s cubic-bezier(.3,.7,.3,1),filter .4s;z-index:var(--z);cursor:pointer;outline:none}
 .seat .figure:focus-visible .char img{filter:drop-shadow(0 0 10px var(--c))}
 .seat .bob,.seat .sway,.seat .char{height:100%;transform-origin:50% 100%}
-.seat .char{position:relative;display:inline-block}
-.seat .char img{height:100%;display:block;-webkit-mask-image:linear-gradient(180deg,#000 82%,transparent 100%);mask-image:linear-gradient(180deg,#000 82%,transparent 100%);filter:drop-shadow(0 10px 18px #000c);user-select:none;-webkit-user-drag:none}
+.seat{--neck:46%}
+.seat.head{--neck:50%}.seat.left{--neck:48%}.seat.right{--neck:49%}.seat.operations{--neck:45%}.seat.creative{--neck:45%}.seat.projects{--neck:44%}
+.seat .sway{transform:rotate(var(--body-turn,0deg));transition:transform var(--pose-time,1.6s) cubic-bezier(.22,.7,.27,1)}
+.seat .char{position:relative;display:inline-block;transform:translateY(var(--posture-y,0%)) rotate(var(--gesture-turn,0deg));transition:transform var(--pose-time,1.6s) cubic-bezier(.22,.7,.27,1)}
+.seat .char img{height:100%;display:block;filter:drop-shadow(0 10px 18px #000c);user-select:none;-webkit-user-drag:none}
+.seat .char>.body-art{-webkit-mask-image:linear-gradient(to bottom,transparent calc(var(--neck) - 5%),#000 calc(var(--neck) + 1%),#000 82%,transparent 100%);mask-image:linear-gradient(to bottom,transparent calc(var(--neck) - 5%),#000 calc(var(--neck) + 1%),#000 82%,transparent 100%)}
+.seat .head-art{position:absolute;inset:0;transform-origin:50% var(--neck);transform:translateX(var(--head-x,0%)) rotate(var(--head-turn,0deg));transition:transform var(--pose-time,1.6s) cubic-bezier(.22,.7,.27,1);-webkit-mask-image:linear-gradient(to bottom,#000 calc(var(--neck) - 5%),transparent calc(var(--neck) + 1%));mask-image:linear-gradient(to bottom,#000 calc(var(--neck) - 5%),transparent calc(var(--neck) + 1%))}
+.seat .head-art img{width:100%;height:100%;filter:none}
 .seat .char i{position:absolute;pointer-events:none;display:block}
-.seat .glow{left:calc(var(--ex) - var(--ew)/2);top:calc(var(--ey) - var(--eh)/2);width:var(--ew);height:var(--eh);border-radius:50%;background:radial-gradient(closest-side,var(--c),transparent);mix-blend-mode:screen;opacity:.4;filter:blur(3px);animation:glowIdle 3.4s ease-in-out infinite alternate;transition:opacity .25s}
-.seat .blink{left:calc(var(--ex) - var(--ew)/2.4);top:calc(var(--ey) - var(--eh)/2);width:calc(var(--ew)/1.2);height:var(--eh);border-radius:40%;background:#04070c;transform:scaleY(0);animation:blink var(--blink,5s) linear var(--blinkd,0s) infinite}
+.seat .glow{left:calc(var(--ex) - var(--ew)/2);top:calc(var(--ey) - var(--eh)/2);width:var(--ew);height:var(--eh);border-radius:50%;background:radial-gradient(closest-side,var(--c),transparent);mix-blend-mode:screen;opacity:.4;filter:blur(3px);transform:translateX(var(--gaze-x,0%));animation:glowIdle 3.4s ease-in-out infinite alternate;transition:opacity .25s,transform var(--pose-time,1.6s) cubic-bezier(.22,.7,.27,1)}
+.seat .blink{left:calc(var(--ex) - var(--ew)/2.4);top:calc(var(--ey) - var(--eh)/2);width:calc(var(--ew)/1.2);height:var(--eh);border-radius:40%;background:#04070c;transform:translateX(var(--gaze-x,0%)) scaleY(0);transform-origin:50% 50%}
+.seat .blink.is-blinking{animation:blink .2s cubic-bezier(.32,0,.6,1) 1}
 .seat .wave{left:calc(var(--wx) - 6%);top:calc(var(--wy) - 2%);width:12%;height:4%;display:flex!important;gap:8%;align-items:center;justify-content:center;opacity:0;transition:opacity .2s}
 .seat .wave b{flex:1;height:30%;background:var(--c);border-radius:2px;box-shadow:0 0 4px var(--c);animation:wave .42s ease-in-out infinite alternate}
 .seat .wave b:nth-child(2){animation-delay:-.12s}.seat .wave b:nth-child(3){animation-delay:-.3s}.seat .wave b:nth-child(4){animation-delay:-.2s}.seat .wave b:nth-child(5){animation-delay:-.05s}
 .seat.head .wave{opacity:.45}
-.seat .bob{animation:breathe var(--breath,4s) ease-in-out var(--bdelay,0s) infinite}
-.seat .sway{animation:look var(--look,10s) ease-in-out var(--ldelay,0s) infinite}
-.seat .char{animation:var(--busyanim,none) var(--busy,3s) ease-in-out var(--busyd,0s) infinite}
-.seat.head{--busyanim:calm}
-.seat.left{--busyanim:typing}
-.seat.right{--busyanim:leanIn}
-.seat.operations{--busyanim:clipboard}
-.seat.creative{--busyanim:bop}
-.seat.projects{--busyanim:calm}
+.seat .bob{animation:breathe var(--breath,5s) cubic-bezier(.45,0,.55,1) var(--bdelay,0s) infinite}
 .seat .fx{inset:0}
 .seat.left .fx{left:calc(var(--ex) - var(--ew)/2);top:calc(var(--ey) - var(--eh)/2);width:var(--ew);height:var(--eh);overflow:hidden;border-radius:3px}
 .seat.left .fx::after{content:"";position:absolute;top:0;bottom:0;width:26%;background:linear-gradient(90deg,transparent,#fff6d0cc,transparent);mix-blend-mode:screen;animation:scan var(--scan,2.2s) ease-in-out infinite alternate}
@@ -67,8 +66,9 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .seat.talking .bubble{opacity:1;transform:translateX(-50%) scale(1)}
 .seat.talking .glow{opacity:1;animation:talkGlow .28s ease-in-out infinite alternate}
 .seat.talking .wave{opacity:1}
-.seat.talking .char{animation:talkBob .5s ease-in-out infinite alternate}
+.seat.talking .char{transition-timing-function:cubic-bezier(.2,.75,.3,1)}
 .seat.talking .char img{filter:drop-shadow(0 0 14px color-mix(in srgb,var(--c) 70%,transparent)) drop-shadow(0 10px 18px #000c)}
+.seat.talking .head-art img{filter:none}
 .debating .seat:not(.talking) .figure{filter:brightness(.88)}
 .seat.listening .bob{animation-duration:6s}
 .agreed .seat .char{animation:nod .55s ease-in-out 3}
@@ -82,10 +82,10 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .agreed-ring[hidden]{display:none}
 .agreed-ring span{font-size:clamp(14px,2.4cqi,30px);letter-spacing:.3em;color:#d9fff2;text-shadow:0 0 14px #5dffd0;font-weight:600}
 .agreed-ring small{position:absolute;bottom:-38%;font-size:clamp(8px,.95cqi,12px);color:#bfeee0;white-space:nowrap;transform:rotateX(-55deg)}
-.holo-tasks{position:absolute;left:50%;bottom:1.5%;width:40%;max-height:31%;overflow:auto;transform:translateX(-50%) perspective(700px) rotateX(14deg);transform-origin:50% 100%;z-index:70;padding:8px 12px;border-radius:14px;background:linear-gradient(180deg,#0a2a3acc,#061722e6);border:1px solid #5ee7ff66;box-shadow:0 0 26px #39d6ff40,inset 0 0 30px #39d6ff22;font-size:clamp(9px,1cqi,12px)}
+.holo-tasks{position:absolute;left:50%;bottom:clamp(44px,11%,70px);width:52%;max-height:42%;overflow:auto;scrollbar-color:#5bbed4 #061722;transform:translateX(-50%) perspective(700px) rotateX(14deg);transform-origin:50% 100%;z-index:70;padding:10px 14px;border-radius:14px;background:linear-gradient(180deg,#0a2a3acc,#061722e6);border:1px solid #5ee7ff66;box-shadow:0 0 26px #39d6ff40,inset 0 0 30px #39d6ff22;font-size:clamp(11px,1.1cqi,13px)}
 .holo-tasks .panel-heading{display:flex;justify-content:space-between;color:#8ff0ff;letter-spacing:.18em;font-size:10px;margin-bottom:4px}
 .holo-tasks .task-row{padding:4px 0;gap:8px}
-.holo-tasks .task-row strong{font-size:clamp(9px,1cqi,12px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.holo-tasks .task-row strong{font-size:clamp(11px,1.1cqi,13px);overflow-wrap:anywhere}
 .holo-tasks .task-row>div{min-width:0}
 .holo-tasks .chip{display:inline-block;padding:0 6px;border-radius:6px;border:1px solid #5ee7ff55;margin-right:4px;font-size:.85em}
 .holo-tasks .chip.running{border-color:#ffd27a;color:#ffd27a}.holo-tasks .chip.completed{border-color:#6dffb0;color:#6dffb0}.holo-tasks .chip.failed,.holo-tasks .chip.cancelled{border-color:#ff9a9a;color:#ff9a9a}
@@ -104,18 +104,11 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 .health-row.off .chip{background:#26303a;color:#a9b6c2}.health-row.configured .chip{background:#3a3110;color:#ffd77a}
 .health-time{color:#6f8799;font-size:11px}
 .debate-topic{width:min(34vw,320px);padding:6px 10px;border-radius:8px;border:1px solid #7fd8ff55;background:#06111ccc;color:#e6f4ff;font:inherit;font-size:12px}
-@keyframes breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-1.1%) scale(1.006,1.012)}}
-@keyframes look{0%,58%,100%{transform:rotate(0)}64%,72%{transform:rotate(-2.2deg) translateX(-1.2%)}78%,86%{transform:rotate(1.8deg) translateX(1%)}92%{transform:rotate(0)}}
-@keyframes blink{0%,93%,100%{transform:scaleY(0)}95.5%{transform:scaleY(1)}}
+@keyframes breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-1%) scale(1.005,1.01)}}
+@keyframes blink{0%,100%{transform:translateX(var(--gaze-x,0%)) scaleY(0)}45%,55%{transform:translateX(var(--gaze-x,0%)) scaleY(1)}}
 @keyframes glowIdle{from{opacity:.28}to{opacity:.55}}
 @keyframes talkGlow{from{opacity:.75;transform:scale(1)}to{opacity:1;transform:scale(1.18)}}
 @keyframes wave{from{height:20%}to{height:100%}}
-@keyframes calm{0%,100%{transform:rotate(-.6deg)}50%{transform:rotate(.6deg)}}
-@keyframes typing{0%,46%,100%{transform:translate(0,0)}4%{transform:translate(.4%,.5%)}8%{transform:translate(-.3%,.2%)}12%{transform:translate(.3%,.6%)}16%{transform:translate(-.4%,.1%)}20%{transform:translate(.2%,.5%)}24%{transform:translate(-.2%,.2%)}28%{transform:translate(.3%,.6%)}32%{transform:translate(0,.1%)}}
-@keyframes leanIn{0%,30%,100%{transform:none}42%,62%{transform:translate(-2%,1.5%) rotate(-2.2deg) scale(1.03)}}
-@keyframes clipboard{0%,40%,100%{transform:none}48%,66%{transform:translateY(1.4%) rotate(2.4deg)}74%{transform:rotate(-1deg)}}
-@keyframes bop{0%,100%{transform:rotate(-2.4deg) translateY(0)}25%{transform:rotate(0) translateY(-1.4%)}50%{transform:rotate(2.4deg) translateY(0)}75%{transform:rotate(0) translateY(-1.4%)}}
-@keyframes talkBob{from{transform:translateY(0) rotate(-.8deg)}to{transform:translateY(-1.2%) rotate(.9deg)}}
 @keyframes nod{0%,100%{transform:none}40%{transform:translateY(1.6%) rotate(1.5deg) scaleY(.985)}}
 @keyframes scan{from{left:-26%}to{left:100%}}
 @keyframes brain{0%,100%{opacity:.35;transform:scale(.94)}50%{opacity:.85;transform:scale(1.06)}}
@@ -124,9 +117,9 @@ body.voice-conversation #conversation.active{grid-template-columns:minmax(0,1fr)
 @keyframes rotor{to{transform:scaleX(-1)}}
 @keyframes progress{0%{width:0}90%,100%{width:92%}}
 @keyframes stamp{from{opacity:0;transform:translate(-50%,-50%) perspective(400px) rotateX(55deg) scale(1.8)}to{opacity:1;transform:translate(-50%,-50%) perspective(400px) rotateX(55deg) scale(1)}}
-.no-motion .board-stage *,.no-motion .board-stage *::before,.no-motion .board-stage *::after{animation:none!important;transition:none!important}
 @media (prefers-reduced-motion:reduce){.board-stage *,.board-stage *::before,.board-stage *::after{animation:none!important;transition:none!important}}
-@media(max-width:980px){.seat .plate .seat-status{display:none}.holo-tasks{width:56%}}
+@media (prefers-reduced-motion:reduce){.seat .sway,.seat .char,.seat .head-art,.seat .glow{transform:none!important}}
+@media(max-width:980px){.seat .plate .seat-status{display:none}.holo-tasks{width:60%}}
 /* ---------- Live board: hand-offs and directors at work (live.js) ---------- */
 .handoff-orb{position:absolute;z-index:80;width:0;height:0;pointer-events:none;transition:left 1.2s cubic-bezier(.55,.05,.35,1),bottom 1.2s cubic-bezier(.3,.6,.4,1)}
 .handoff-orb i{position:absolute;left:-11px;top:-11px;width:22px;height:22px;border-radius:50%;background:radial-gradient(circle,#fff 0 18%,var(--c) 45%,transparent 72%);box-shadow:0 0 18px var(--c),0 0 42px var(--c);animation:orbPulse .5s ease-in-out infinite alternate}

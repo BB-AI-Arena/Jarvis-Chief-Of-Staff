@@ -1,0 +1,172 @@
+Jarvis director efficiency validation — November 11, 2026 (America/Chicago)
+
+Build and all four live commands exited 0. scripts/check.sh exited 0 with 97 PASS lines.
+Projects delegation is enabled for CTO, Research (including Claude fallback), and Creative video planning. Each assignment permits three delegations, 120 seconds each, using qwen3.5:latest on DARK.
+No installation or push performed.
+
+Build
+=====
+[0/1] Planning build
+Building for production...
+[0/3] Write sources
+[1/3] Write swift-version--1AB21518FC5DEDBE.txt
+[3/4] Compiling Jarvis Acceptance.swift
+[3/5] Write Objects.LinkFileList
+[4/5] Linking Jarvis
+Build complete! (33.48s)
+/Users/vader/Documents/ChatGPT/Collectibles App/Jarvis/dist/Jarvis.app: replacing existing signature
+/Users/vader/Documents/ChatGPT/Collectibles App/Jarvis/dist/Jarvis.app
+
+Checks
+======
+[0/1] Planning build
+Building for production...
+[0/2] Write swift-version--1AB21518FC5DEDBE.txt
+Build complete! (0.16s)
+PASS: silence alone never sends an empty model request
+PASS: a short thinking pause does not submit early
+PASS: ongoing speech postpones turn completion even without new recognition text
+PASS: a completed spoken turn submits automatically after silence
+PASS: final callback cannot submit the same turn a second time
+PASS: recognizer callbacks outside the listening phase cannot become a new turn
+PASS: ending the conversation discards pending microphone text
+PASS: a recognizer final result can end a turn without an extra delay
+PASS: whitespace transcripts do not send requests
+PASS: plain and fenced routing accepted; malformed, unknown and empty instructions rejected
+PASS: Jarvis never executes; work is assigned to a director, and an unverified manager id stays unset
+PASS: a suggested task is never an assignment; it needs approval before it reaches the ledger
+PASS: Luna's routing schema is strict (every property required, optional ones nullable) and null directors fall back to classify
+PASS: Jarvis can route a request to a board debate; the question comes from task, and debates are never assignments
+PASS: video requests go to the Creative Director
+PASS: blocked results offer no follow-up (no approval loops), and requests to change Jarvis himself go to Operations
+PASS: assignments preserve actual work and reject acknowledgements; routing declares director limits
+PASS: silent streaming audio stays listening; audible speech holds through short gaps
+PASS: task ledger round-trips, and a running task relaunch is interrupted
+PASS: director work keeps a parent id, and Jarvis is not the owner
+PASS: each director's queue starts the oldest queued task; legacy waiting, unassigned, running and child rows never auto-start
+PASS: a spoken result is one clean sentence without markdown
+PASS: Claude model id defaults to the current Sonnet API id and rejects malformed ids
+PASS: Claude tool_use blocks are parsed into id, name and brief; text-only replies have no tool calls
+PASS: the CTO's tool calls carry their full input, with a bounded number of rounds
+PASS: Research can fall back to Claude with live web search, keeping the answer and its cited sources
+PASS: Grok defaults to the documented xAI model id, rejects malformed ids, and reads only real completions
+PASS: Research asks xAI for live web search and keeps the answer with its cited sources
+PASS: Grok's tool calls are read from the Responses API so Research can use DARK while searching the web
+PASS: research depth, tool limits, DARK relevance and daily seat token usage
+PASS: Projects validates full input, supports three tool schemas, caps delegations and cancels timed-out work exactly once
+PASS: Cursor cloud agents launch with the persona brief on a validated https repo and read only documented run states
+PASS: debate prompts carry the question, the round and every earlier turn
+PASS: the chair verdict is read only from real JSON with a boolean and a decision
+PASS: debate turns become clean single bubble lines without name prefixes or markdown
+PASS: the task list records the outcome honestly, the chair model, and the full transcript
+PASS: Jarvis acknowledges who is debating and announces the verdict, or says plainly when there is none
+PASS: the Projects seat sends a local Ollama chat body and reads only real replies
+PASS: Projects talks to the 4090's Ollama by default and only accepts local-network model servers
+PASS: Creative recognises video requests and their length, capped at 60 seconds
+PASS: shot lists are read from the planner's JSON and clamped to the requested length and each renderer's clip limit
+PASS: the shot list document records the renderer, cost and each shot's outcome
+PASS: Grok Imagine requests use the documented fields, and finished, failed and malformed replies are told apart
+PASS: the 4090's ComfyUI workflow gets the shot's prompt, frame count and seed, and the rendered video file is found in its history
+PASS: DARK is reached over SSH with Jarvis's own key only (no password, no agent forwarding), and bad settings fall back to safe defaults
+PASS: spoken lengths like "thirty-second" are read as numbers
+PASS: the Studio card's progress comes from real stages, ComfyUI nodes and sampler steps
+PASS: ComfyUI's websocket events are read per job and other messages are ignored
+PASS: directors can run commands on DARK through Jarvis; deleting, sudo, reboots, firewall, user and SSH key changes are refused before anything runs
+PASS: the Keychain helper only touches Jarvis's own entries and never takes a key from its arguments
+PASS: the fast router sends the shared rules, memory and a forced route tool to a small Claude model
+PASS: router replies are validated like every other brain; Jarvis is never a director and unknown routes are dropped
+PASS: router keeps task separate from speech and defaults to no follow-up
+PASS: board memory appends dated one-line entries and recalls the most recent ones as context
+PASS: the CTO's tools are read-only, stay inside the workspace and source folders, and never expose secrets, hidden or dependency files
+PASS: the acceptance run fails a request that is refused, lost, or sent to the wrong director
+PASS: video artwork verification cannot pass acceptance when assigned to Research
+PASS: health failures show the HTTP status and provider message, with any key-shaped text redacted
+PASS: health results read real replies and print one key-free line per connection
+PASS: the headless health check reads the same saved seat settings as the app
+PASS: at launch Jarvis names what is disconnected or not answering, and stays quiet when all is well
+PASS: every board persona and the charter are bundled and loadable
+PASS: UI updates apply in place from the source page, skip broken scripts, and never outlive a newer installed build
+PASS: results play inside Jarvis from the Results folder only, with seeking
+PASS: tokens are read from each provider's reply and charged to the director whose work made the call
+
+> jarvis-chief-of-staff@0.4.0 test
+> node tests/check_conversation.cjs && node tests/check_live.cjs
+
+PASS: spoken replies default on
+PASS: the prominent face stays active through every conversation phase
+PASS: silence-completed voice turn sends automatically, without Enter or Send
+PASS: a conversational reply speaks once in Lewis, even if typed replies were muted
+PASS: interruption is available while Jarvis answers
+PASS: stopped conversations cannot dispatch late microphone turns
+PASS: floating orb never duplicates chat requests or spoken replies
+PASS: actual audio time selects closed lips and rounded vowels; idle releases the mouth
+PASS: Luna selection honors API streaming voice after a key is saved
+PASS: streaming microphone meter reports captured input and hides when stopped
+PASS: the board names each director, keeps voice preview, and marks unconnected seats
+PASS: the Operations manager stays unset until a verified model is saved
+PASS: the CTO seat stays disconnected until Claude reports a successful check
+PASS: active and recent tasks render, and Stop targets the running task
+PASS: the boardroom layers each director separately with its own idle timing and a settings popover
+PASS: the boardroom table shows the task list with Stop on running work
+PASS: debate playback animates turns in order, then the agreement beat; the demo is labelled as a demo
+PASS: the Research seat shows Grok only after xAI confirms the key, and its model is configurable
+PASS: the Creative Director runs on Cursor cloud agents with a configurable repository and model
+PASS: suggested tasks wait for approval; only Approve sends them to the task list
+PASS: a live debate is convened by topic, plays each model round as it arrives, and ends on the chair verdict
+PASS: the page speaks the verdict only when no live voice session is relaying it
+PASS: Settings runs the health check and shows each connection as ok, failed or off with its detail
+PASS: the task list lets you assign an unrouted request, remove a queued one, and open a saved result
+PASS: Jarvis speaks a finished result on the page when no live voice is relaying it
+PASS: with Grok off, the Research seat shows Claude standing in, and its tasks stay labelled Research
+PASS: the Projects seat runs on a chosen local Ollama model and its tasks are labelled Projects
+PASS: a hand-off flies from Jarvis to the director, who lights up as working on the board and the home strip
+PASS: the Studio card shows each shot, the sampler step and the 4090 live, and plays the finished video
+PASS: clicking a director shows what it is doing, its tasks with results, and its tokens by model
+PASS: results open inside Jarvis: the video plays with shot picks, and the document reads safely
+PASS: Settings can reload the UI from source, and the page may play result media
+
+Live acceptance
+===============
+PASS  1 “Verify the Drop Assassin video uses the real artwork” · reply · 1159 ms
+PASS  2 “Add drafting the launch plan to the task list.” · assign → projects · 1037 ms
+PASS  3 “Research the top three competitors in handyman scheduling so” · assign → research · 1448 ms
+PASS  4 “Have the board debate whether we should ship the handyman ap” · debate · 927 ms
+PASS  5 “Good morning Jarvis, how are you today?” · reply · 1078 ms
+PASS  6 “Do an engineering review of how the task ledger saves its re” · assign → technology · 1836 ms
+PASS  7 “Design a logo and a name for the handyman app.” · assign → creative · 1600 ms
+PASS  8 “Build me a project plan with milestones and dates for the ha” · assign → projects · 1163 ms
+PASS  9 “Remember that our first target customer is solo handymen.” · remember · 759 ms
+PASS 10 “I've been going back and forth on pricing lately.” · reply · 977 ms
+PASS 11 “Create a 30 second cinematic video about Drop Assassin in HD” · assign → creative · 1189 ms
+PASS 12 “Fix your own UI so I can watch each director working when yo” · assign → operations · 1734 ms
+PASS 13 “Yes, go ahead.” · assign → projects · 1533 ms
+ALL 13 REQUESTS ROUTED CORRECTLY
+
+Live Projects delegation
+========================
+CTO → Projects: summarize launch notes · handoff
+CTO → Projects: summarize launch notes · done
+qwen3.5:latest: The launch will take place on December 3 and is owned by Maya.
+CTO: The launch will take place on December 3 and is owned by Maya.
+PASS CTO delegated to Projects · projects tokens 104
+
+Research timing (GROK_MODEL=grok-4.20-0309-non-reasoning)
+=========================================================
+model grok-4.20-0309-non-reasoning · system prompt 7900 chars
+chat (no search)   3.3 s · 1 calls · 2039 in · 363 out · 1672 chars
+web search   7.3 s · 1 calls · 58394 in · 792 out · 3086 chars
+web search + DARK tool  19.1 s · 1 calls · 79268 in · 1197 out · 3390 chars
+
+Live DARK tools
+===============
+  CTO → run_on_dark: nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader
+  CTO → run_on_dark: ls -1 ~/ComfyUI/models/checkpoints
+  Research → run_on_dark: nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader
+  Research → run_on_dark: ls -1 ~/ComfyUI/models/checkpoints
+  Projects → run_on_dark: nvidia-smi --query-gpu=name,mem.total,mem.used --format=csv
+PASS  CTO (Claude): GPU: NVIDIA GeForce RTX 4090, with 23028 MiB total VRAM and 19691 MiB used. / Checkpoints: `ltx-2.3-22b-distilled-fp8.safetensors` and `put_checkpoints_here`. The second is ComfyUI's placeholder file, not a model.
+PASS  Research (Grok): GPU: NVIDIA GeForce RTX 4090, 23028 MiB total, 19691 MiB used. / Checkpoints: ltx-2.3-22b-distilled-fp8.safetensors, put_checkpoints_here.
+  Projects → run_on_dark: nvidia-smi --query-gpu=name,mem.total,mem.used --format=csv
+  Projects → run_on_dark: nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv
+  Projects → run_on_dark: ls ~/ComfyUI/models/checkpoints
+PASS  Projects (qwen3.5:latest): RTX 4090: 23028 MiB total, 19691 MiB used; Checkpoints: ltx-2.3-22b-distilled-fp8.safetensors, put_checkpoints_here

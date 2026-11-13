@@ -1,7 +1,7 @@
 """Exercise the installed local model with the app's actual router instructions."""
 import json, pathlib, re, time, urllib.request
-source = (pathlib.Path(__file__).parents[1] / 'Sources/Jarvis/main.swift').read_text()
-system = re.search(r'let system = "(.*)"', source).group(1)
+source = (pathlib.Path(__file__).parents[1] / 'Sources/Jarvis/AppVoice.swift').read_text()
+system = json.loads('"' + re.search(r'\+ "(You are Jarvis,.*?)(?<!\\)"', source).group(1) + '"')
 schema = {'type': 'object', 'properties': {'route': {'type': 'string', 'enum': ['reply', 'astra', 'task']}, 'text': {'type': 'string'}}, 'required': ['route', 'text'], 'additionalProperties': False}
 for prompt, route in [
     ('Hello Jarvis. Are you ready? One short sentence.', 'reply'),

@@ -23,7 +23,7 @@ enum CursorClient {
     static func agentLink(_ id: String) -> String { "https://cursor.com/agents/" + id }
     /// The brief sent to the cloud agent: the Creative Director persona first, then Jarvis's assignment.
     static func prompt(persona: String, brief: String) -> String {
-        persona + "\n\n---\nASSIGNMENT FROM JARVIS (Creative Director brief):\n" + String(brief.prefix(12000))
+        persona + "\n\n---\nASSIGNMENT FROM JARVIS (Creative Director brief):\n" + PromptDelivery.envelope(brief)
             + "\n\n---\nReport what you changed or produced, what you verified, and anything left open. Do not claim checks you did not run."
     }
     static func launchBody(prompt: String, repo: String, model: String, name: String) -> [String: Any] {
@@ -65,12 +65,9 @@ enum CursorClient {
         }.resume()
     }
     static func launch(prompt: String, repo: String, model: String, name: String, apiKey: String, completion: @escaping ((agent: String, run: String)?, Int) -> Void) {
-        URLSession.shared.dataTask(with: request("/v1/agents", method: "POST", apiKey: apiKey, body: launchBody(prompt: prompt, repo: repo, model: model, name: name))) { data, response, _ in
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let ids = (200..<300).contains(code) ? data.flatMap { parseLaunch($0) } : nil
-            DispatchQueue.main.async { completion(ids, code) }
-        }.resume()
+        DispatchQueue.main.async { completion(nil, 402) } // No provider-enforced per-run cost ceiling.
     }
+
     static func run(agent: String, run: String, apiKey: String, completion: @escaping ((status: String, result: String?, pr: String?)?) -> Void) {
         let path = "/v1/agents/\(agent.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")/runs/\(run.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")"
         URLSession.shared.dataTask(with: request(path, method: "GET", apiKey: apiKey)) { data, response, _ in

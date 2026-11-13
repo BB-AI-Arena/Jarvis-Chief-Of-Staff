@@ -1,0 +1,22 @@
+CANONICAL — paste unchanged, then append one action sentence.
+
+Drop Assassin, the same hooded figure in every shot. Matte-black double-breasted tactical longcoat to the ankles, hood up, high collar. One solid horizontal crimson visor band across the eyes, opaque, no visible eyes. Fair lower face, small nose, closed mouth, no beard, jaw in shadow. Thin silver filament seams along the shoulder seams and outer sleeves. Black gloves, black combat boots. A compact carbon drop-rig of two folded fins on the upper back, carbon weave, silver leading edges. High-contrast cinematic grade, crushed blacks, teal night fill, hard magenta rim light on the hood edge and coat rim only, the coat stays matte black, wet highlights. No on-screen text, HD.
+
+NEGATIVE
+
+blurry, low quality, distorted, deformed, watermark, text artifacts, pc game, video game, cartoon, ugly, bare face, visible eyes, two eye slits, full face mask, white chest emblem, six wings, spider wings, chest glider, red suit, beard, smile, teeth, different person
+
+GRADE TARGETS (match by eye, sampled from the existing plates)
+
+coat #130B07
+visor #BF312F
+visor core #F4373B
+jaw #D6814F
+silver filament #C4C7C8
+night teal #091E27
+cyan bounce #12B3B7
+magenta rim #E22D83
+
+FRAME
+
+1280x704, 24 fps. Reference plate: docs/drop-assassin/refs/lock-shot3-2s.jpg

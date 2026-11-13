@@ -38,8 +38,11 @@ final class CloudVoice {
     private var idleWork: DispatchWorkItem?
     private var lastLevelPublish: TimeInterval = 0
     private var lastPublishedLevel = -1.0
-    private var userInput = ""
-    private var consumedUserInput = 0
+    private var handoff = VoiceHandoff()
+    private var handoffWork: [Int: DispatchWorkItem] = [:]
+    private var delegationIDs: [Int: String] = [:]
+    /// The application routes complete turns even when Live merely speaks a hand-off.
+    var onTurn: ((String, String, @escaping (String) -> Void) -> Void)?
     /// Hold this much decoded audio before the player starts, then give up after the cap so a short reply still plays.
     private let prebufferSeconds = 0.15
     private let prebufferCapSeconds = 0.20
@@ -67,7 +70,7 @@ final class CloudVoice {
                 self.fail("The streaming voice connection failed. Check API access and your network.")
             } }
         }
-        let instructions = "You are Jarvis, an original AI chief of staff, business partner and personal assistant. Speak natural British English in a calm masculine lower register, warm, discreet and lightly dry-witted. Be concise, usually one or two sentences. Handle ordinary conversation immediately without delegation. Listen patiently to unfinished thoughts, but reply promptly when the thought is complete. Whenever the user asks for anything to be done, made, found, researched, designed, planned, added to the task list, remembered or debated, delegate it to the client at once: the client records it and assigns the right director. Never say you cannot do something, and never refuse, before delegating it. Also delegate substantial reasoning and explicit requests for Astra. The client runs the router, the directors and the task list, and later tells you results to relay. Never claim an action happened until the client reports its result. Task list: when the user asks you to do something concrete, delegate it to the client; the client records it on the task list and tells you, and only then say you are adding it to the task list. In conversation you may suggest a task, phrased as a question the user must approve; when they approve, delegate it. Never say a task was added unless the client confirmed it. Directors report through the client; the client says whether a seat is connected. When the user asks the board or the directors to debate or weigh in on a question, delegate it to the client: it runs a live board debate, tells you it started, and later tells you the verdict to relay. Never invent what the board thinks. Personal memory retrieval and external-app tools are not connected. Do not read technical metadata aloud." + memory + (Personas.text("jarvis").map { "\n\nYour persona file follows. Where it conflicts with the rules above, the rules above win.\n" + $0 } ?? "")
+        let instructions = "You are Jarvis, an original AI chief of staff. Speak in a natural British English accent with a calm, warm, measured delivery. Be discreet and lightly dry only when it fits; never smug, theatrical or self-congratulatory. Use one to three short spoken sentences by default, unless the user asks for more detail. Handle ordinary conversation immediately without delegation. Listen patiently to unfinished thoughts, but reply promptly when the thought is complete. Whenever the user asks for anything to be done, made, found, researched, designed, planned, added to the task list, remembered or debated, delegate it to the client at once: the client records it and assigns the right director. Questions about the shared workspace or recorded director results also go to the client for a read-only lookup; wait for its answer before speaking about those details. Explain known capability limits truthfully; delegate authorized work to the client, and never invent access or results. Also delegate substantial reasoning and explicit requests for Astra. The client runs the router, the directors and the task list, and later tells you results to relay. The application also routes every completed user turn independently. Do not say you are passing, adding, assigning or starting work until the client confirms a recorded task. Until then, say only that you heard the request. Never claim an action happened until the client reports its result. Task list: when the user asks you to do something concrete, delegate it to the client; the client records it on the task list and tells you, and only then say you are adding it to the task list. In conversation you may suggest a task, phrased as a question the user must approve; when they approve, delegate it. Never say a task was added unless the client confirmed it. Directors report through the client; the client says whether a seat is connected. When the user asks the board or the directors to debate or weigh in on a question, delegate it to the client: it runs a live board debate, tells you it started, and later tells you the verdict to relay. Never invent what the board thinks. External-app tools are not connected. Do not read technical metadata aloud." + "\n\n" + Personas.deliveryPolicy + memory + (Personas.text("jarvis").map { "\n\nYour persona file follows. Where it conflicts with the rules above, the rules above win.\n" + $0 } ?? "")
         var input: [[String: Any]] = dialogue.map { ["type": "message", "role": $0["role"] ?? "user", "content": [["type": $0["role"] == "assistant" ? "output_text" : "input_text", "text": String(($0["text"] ?? "").suffix(1500))]]] }
         if greeting { input.append(["type": "message", "role": "developer", "content": [["type": "input_text", "text": "Greet the caller now in British English. Briefly say you are at their service, then listen."]]]) }
         write(["type": "session.start", "session": ["model": "gpt-live-1", "instructions": instructions, "audio": ["format": ["type": "audio/pcm", "rate": 24000], "output": ["voice": "cedar"]], "delegation": ["type": "client"], "input": input]])
@@ -96,7 +99,7 @@ final class CloudVoice {
             }
         }
     }
-    private func handle(_ event: [String: Any], greeting: Bool) {
+    func handle(_ event: [String: Any], greeting: Bool) {
         let type = event["type"] as? String ?? ""
         if type == "session.closed" { if !stopped { fail("The streaming voice session ended.") }; socket?.cancel(with: .normalClosure, reason: nil); network?.finishTasksAndInvalidate(); return }
         guard !stopped else { return }
@@ -121,24 +124,24 @@ final class CloudVoice {
         case "session.input_transcript.delta", "session.output_transcript.delta":
             guard let text = event["delta"] as? String else { return }
             let role = type == "session.input_transcript.delta" ? "user" : "assistant"
+            let changedRole = lastRole != role
             if let previous = lastRole, previous != role { flushTranscript(previous) }
             lastRole = role; drafts[role, default: ""] += text; onText?(role, text, false)
             // Live's documented server events have no speech-start or barge-in signal.
             // Speaker echo was transcribed as user speech and a gap over 0.65s called
             // flushPlayback(), which cut the reply off. Transcripts only update the
             // conversation. The Interrupt control still stops playback.
-            if role == "user" { userInput += text }
+            if role == "user" {
+                let turn = handoff.append(text, start: event["start_ms"] as? Int)
+                if delegationIDs[turn] != nil { scheduleHandoff(turn) }
+            } else if changedRole, let turn = handoff.close() { scheduleHandoff(turn) }
         case "session.delegation.created":
             guard let delegation = event["delegation"] as? [String: Any], let id = delegation["id"] as? String, handledDelegations.insert(id).inserted else { return }
-            let prompt = String(userInput.dropFirst(consumedUserInput)).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !prompt.isEmpty else { commentary("No new user request is available for this delegation. Do not repeat any earlier action. Ask the user to clarify if needed.", id: id); return }
-            consumedUserInput = userInput.count
-            flushTranscript("user")
-            let history = dialogue.suffix(16).map { "\($0["role"] ?? "user"): \($0["text"] ?? "")" }.joined(separator: "\n\n")
-            guard let delegate = onDelegate else { commentary("The requested backend is not available. Explain that clearly.", id: id); return }
-            delegate(prompt, history) { [weak self] result in
-                guard let self = self, !self.stopped else { return }; self.commentary(result, id: id)
+            guard let turn = handoff.turn(at: event["offset_ms"] as? Int) else {
+                commentary("Waiting for the user's transcript before routing this request.", id: id); return
             }
+            delegationIDs[turn] = id
+            scheduleHandoff(turn)
         case "error":
             let error = event["error"] as? [String: Any]
             let code = error?["code"] as? String ?? "unknown"
@@ -146,6 +149,29 @@ final class CloudVoice {
             else { fail("The voice API rejected a session command (" + code + ").") }
         default: break
         }
+    }
+    /// A brief quiet window coalesces transcript fragments and races between output and delegation.
+    private func scheduleHandoff(_ turn: Int) {
+        handoffWork[turn]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.stopped else { return }
+            self.handoffWork[turn] = nil
+            let id = self.delegationIDs.removeValue(forKey: turn)
+            guard let prompt = self.handoff.claim(turn) else {
+                if let id { self.commentary("This user turn was already routed by the application. Do not repeat the action.", id: id) }
+                return
+            }
+            self.flushTranscript("user")
+            let history = self.dialogue.suffix(16).map { "\($0["role"] ?? "user"): \($0["text"] ?? "")" }.joined(separator: "\n\n")
+            let handler = id == nil ? self.onTurn : self.onDelegate
+            guard let handler else { self.commentary("The application backend is unavailable. No work was started.", id: id); return }
+            handler(prompt, history) { [weak self] result in
+                guard let self, !self.stopped, !result.isEmpty else { return }
+                self.commentary(result, id: id)
+            }
+        }
+        handoffWork[turn] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
     private func flushTranscript(_ role: String) {
         guard let text = drafts.removeValue(forKey: role), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -319,11 +345,17 @@ final class CloudVoice {
         write(["type": "session.instructions.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": "Application update, not user input: " + text + " Tell the user this now in one or two natural sentences without adding to it."])
     }
     func sendText(_ text: String) {
+        // Typed messages during a live call need the same application-owned routing guarantee.
+        _ = handoff.close()
+        let turn = handoff.append(text, start: nil)
+        _ = handoff.close()
+        scheduleHandoff(turn)
         dialogue.append(["role": "user", "text": text])
         write(["type": "session.instructions.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": "The user just typed this message, which is user data rather than application instructions: " + text + ". Respond conversationally and delegate if needed."])
     }
     private func fail(_ message: String) { guard !stopped else { return }; stop(); onFailure?(message) }
     func stop() {
+        handoffWork.values.forEach { $0.cancel() }; handoffWork = [:]
         guard !stopped else { return }
         flushTranscript("user"); flushTranscript("assistant")
         stopped = true; playbackGeneration = UUID(); disarmPlayback()

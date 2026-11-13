@@ -59,6 +59,13 @@ enum TokenMeter {
         lock.unlock()
         DispatchQueue.main.async { onChange?() }
     }
+    /// Tokens a seat has used today (input + output), for per-task budgets.
+    static func used(_ seat: String) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        loadIfNeeded()
+        if dayString(Date()) != day { day = dayString(Date()); today = [:] }
+        return (today[seat] ?? [:]).values.reduce(0) { $0 + $1.total }
+    }
     /// Per-seat summary for the page: today and all time, with a per-model breakdown.
     static func snapshot() -> [String: Any] {
         lock.lock(); defer { lock.unlock() }

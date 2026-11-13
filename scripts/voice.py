@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -13,6 +14,20 @@ MODEL = ROOT / '.voice' / 'models'
 
 def emit(**event):
     print(json.dumps(event), flush=True)
+
+def speech_chunks(text):
+    """Start a short natural phrase promptly; preserve every word in bounded chunks."""
+    words = text.split()
+    chunks, current = [], []
+    for word in words:
+        limit = 85 if not chunks else 180
+        if current and len(' '.join(current + [word])) > limit:
+            chunks.append(' '.join(current)); current = []
+        current.append(word)
+        if re.search(r'[.!?;:]$', word) and len(' '.join(current)) >= 25:
+            chunks.append(' '.join(current)); current = []
+    if current: chunks.append(' '.join(current))
+    return chunks or ['']
 
 def main():
     os.environ.setdefault('OMP_NUM_THREADS', '2')
@@ -35,13 +50,17 @@ def main():
                 voice = str(job.get('voice', 'bm_lewis'))
                 if voice not in kokoro.get_voices():
                     raise ValueError('Unknown Kokoro voice')
-                start = time.monotonic()
-                samples, rate, timings = kokoro.create_timed(text, voice=voice, speed=1.0, lang='en-gb' if voice.startswith('b') else 'en-us')
-                path = output_dir / f'{time.monotonic_ns()}.wav'
-                sf.write(path, samples, rate)
-                for old in sorted(output_dir.glob('*.wav'))[:-4]:
-                    old.unlink(missing_ok=True)
-                emit(id=job.get('id', ''), path=str(path), voice=voice, mouthCues=cues(timings), seconds=round(time.monotonic()-start, 2), duration=round(len(samples)/rate, 2))
+                chunks = speech_chunks(text)
+                for index, chunk in enumerate(chunks):
+                    start = time.monotonic()
+                    samples, rate, timings = kokoro.create_timed(chunk, voice=voice, speed=0.94 if voice == 'bm_lewis' else 1.0, lang='en-gb' if voice.startswith('b') else 'en-us')
+                    path = output_dir / f'{time.monotonic_ns()}.wav'
+                    sf.write(path, samples, rate)
+                    # The native player may still be consuming earlier chunks.
+                    emit(id=job.get('id', ''), path=str(path), voice=voice, chunk=index,
+                         final=index == len(chunks)-1, mouthCues=cues(timings),
+                         seconds=round(time.monotonic()-start, 2), duration=round(len(samples)/rate, 2))
+
             except Exception as exc:
                 emit(id=job.get('id', ''), error=str(exc))
     finally:

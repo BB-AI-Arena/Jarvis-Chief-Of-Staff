@@ -4,22 +4,37 @@ struct TaskRecord: Codable, Equatable {
     var id: String
     var state: String
     var verified: Bool
+    /// Evidence required before a completed result may be called verified.
+    var verificationEvidence: String? = nil
     var owner: String
     var parentID: String?
     var createdAt: String
     var updatedAt: String
     var resultSummary: String
     var title: String
+    /// Full assignment; title remains a short label. Optional for older ledgers.
+    var brief: String? = nil
 
+    /// A display title is never the execution brief. Legacy records fall back to their title.
+    var instructions: String { brief ?? title }
+    var verificationStatus: String {
+        switch state {
+        case "running": return "running"
+        case "completed": return verified && !(verificationEvidence ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "done and verified" : "done but unverified"
+        case "failed", "cancelled": return "failed"
+        default: return "recorded"
+        }
+    }
     static let states = ["proposed", "running", "completed", "failed", "cancelled"]
 
     var payload: [String: Any] {
         var item: [String: Any] = [
-            "id": id, "state": state, "verified": verified, "owner": owner,
+            "id": id, "state": state, "verified": verificationStatus == "done and verified", "verificationStatus": verificationStatus, "owner": owner,
             "createdAt": createdAt, "updatedAt": updatedAt,
             "resultSummary": resultSummary, "title": title
         ]
         if let parentID { item["parentID"] = parentID }
+        if let verificationEvidence, verificationStatus == "done and verified" { item["verificationEvidence"] = verificationEvidence }
         return item
     }
 }

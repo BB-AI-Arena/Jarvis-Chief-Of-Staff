@@ -45,3 +45,15 @@ assert(TaskLedger.headline("## Summary\n**The ledger saves atomically.** It also
 assert(TaskLedger.headline("Short") == "Short")
 assert(TaskLedger.headline(String(repeating: "word ", count: 100)).hasSuffix("…") && TaskLedger.headline(String(repeating: "word ", count: 100)).count <= 221)
 print("PASS: a spoken result is one clean sentence without markdown")
+var storyRecord = record
+storyRecord.brief = String(repeating: "Full story detail. ", count: 100)
+let storyDecoded = try! JSONDecoder().decode(TaskRecord.self, from: JSONEncoder().encode(storyRecord))
+assert(storyDecoded.brief == storyRecord.brief && storyDecoded.brief!.count > 500)
+print("PASS: full story briefs survive ledger persistence without being truncated to the display title")
+
+let completeSource = String(repeating:"all details ",count:5000) + "FINAL_REQUIREMENT"
+let fullRecord = TaskRecord(id:"full",state:"proposed",verified:false,owner:"creative",createdAt:"now",updatedAt:"now",resultSummary:"queued",title:"Short label",brief:completeSource)
+assert(fullRecord.instructions == completeSource)
+let restoredFullRecord = try TaskLedger.decode(TaskLedger.encode([fullRecord]))[0]
+assert(restoredFullRecord.instructions == completeSource)
+print("PASS: display labels never replace full instructions, including after ledger persistence")

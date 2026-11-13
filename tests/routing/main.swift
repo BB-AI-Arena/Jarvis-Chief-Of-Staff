@@ -66,3 +66,39 @@ assert(!RouteDecision.looksBlocked("Done. The board view now animates hand-offs;
 assert(RouteDecision.classify("Fix your own UI so I can watch each director", hinted: nil) == "operations")
 assert(RouteDecision.routerRules.contains("improve yourself by delegating"))
 print("PASS: blocked results offer no follow-up (no approval loops), and requests to change Jarvis himself go to Operations")
+
+let explicit = RouteDecision.decode("""
+{"route":"assign","text":"Moving this to Operations, as agreed.","task":"Fix the task board animation", "director":"operations"}
+""")!
+assert(RouteDecision.assignment(for: explicit)?.text == "Fix the task board animation")
+assert(RouteDecision.work(for: explicit, prompt: "yes") == "Fix the task board animation")
+assert(RouteDecision.isAcknowledgement(explicit.text))
+assert(!RouteDecision.isAcknowledgement("Inspect the source files"))
+let ack = RouteDecision(route: "assign", text: "On it", director: "operations")
+assert(RouteDecision.work(for: ack, prompt: "Fix the task board animation") == "Fix the task board animation")
+assert(RouteDecision.work(for: ack, prompt: "Yes, go ahead") == nil)
+assert(RouteDecision.routerRules.contains(RouteDecision.strengthsRule))
+assert(RouteDecision.strengthsRule.contains("No director can watch a video"))
+print("PASS: assignments preserve actual work and reject acknowledgements; routing declares director limits")
+
+let largeRequest = String(repeating:"requirement ",count:6000) + "KEEP_FINAL_REQUIREMENT"
+for kind in ["assign","task","suggest"] {
+    let data = try! JSONSerialization.data(withJSONObject:["route":kind,"text":"Assignment recorded","task":largeRequest,"director":"creative"])
+    assert(RouteDecision.decode(String(data:data,encoding:.utf8)!)?.task == largeRequest)
+}
+assert(RouteDecision.completeWork("Write the screenplay",original:largeRequest).hasSuffix(largeRequest))
+assert(RouteDecision.completeWork(largeRequest,original:largeRequest) == largeRequest)
+let unicodeRequest = String(repeating:"🦉é中",count:36000) + "COMPLETE_END"
+let pieces = PromptDelivery.parts(unicodeRequest)
+assert(pieces.count == 3 && pieces.allSatisfy {$0.count <= 50000})
+assert(pieces.joined() == unicodeRequest)
+assert(PromptDelivery.envelope(unicodeRequest).contains("BEGIN PART 3/3"))
+assert(PromptDelivery.envelope(unicodeRequest).contains("COMPLETE_END"))
+assert(PromptDelivery.parts("") == [""])
+print("PASS: full routed commands and numbered Unicode-safe 50,000-character parts retain every requirement")
+
+let lookupInput = "{\"path\":\"Results/story.md\",\"offset\":50000}"
+let lookupData = try! JSONSerialization.data(withJSONObject:["route":"lookup","text":"Reading the next saved part","task":lookupInput])
+assert(RouteDecision.decode(String(data:lookupData,encoding:.utf8)!)?.task == lookupInput)
+assert(RouteDecision.assignment(for:RouteDecision.decode(String(data:lookupData,encoding:.utf8)!)!) == nil)
+print("PASS: workspace lookups preserve their cursor and cannot become director assignments")

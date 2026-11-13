@@ -27,7 +27,11 @@ Imagine opening your Mac and talking through the business you want to build. Jar
 
 That is the direction of **Jarvis-Chief-Of-Staff**: a personal AI headquarters with a memorable face, a distinctive voice and the beginnings of a real executive team.
 
-**Already in the source:** streaming voice, local model support, an animated boardroom, real board debates, a local Ollama Projects director, a GPT-6-Sol Operations manager, approval-based task suggestions, a persistent task ledger, an interactive file graph, live director hand-offs, a video Studio, in-app Results and per-director token usage. This is an actively developed source build; provider seats require configuration, and the larger autonomous office is still being built.
+**Current priority:** one dependable loop—speak or type a request, assign a director, track the task, and open its saved result. Native adapters, task records, voice handling and Results exist in source. Provider connectivity and complete spoken delivery must be verified separately; source code and mocked tests are not proof of a working external integration.
+
+**Experimental:** board debates, Operations workers and film Studio. Debate prompts and transcript handling have automated coverage, but a live multi-provider debate is not established by that coverage. Operations uses a configured runtime model; this README does not certify that `gpt-6-sol` is available or has completed an assignment.
+
+New director requests use a conservative **$10 USD daily allowance per director**. Unbounded jobs are blocked. See [spending controls](docs/spending-controls.md) for supported paths and limitations, and [validation](docs/reliability-validation.md) for actual results.
 
 ## See the actual app
 
@@ -63,11 +67,11 @@ The board gives each specialist a seat, a persona and a clear responsibility. Co
 | **Jarvis · Chief of Staff** | Conversation, clarification and delegation | Voice frontend with Luna/Astra routing and local conversation options. |
 | **Chief Technology Officer** | Engineering judgment and technical coordination | Anthropic/Claude adapter, configurable model, native tool-call handling and bounded tool rounds. Requires a verified API connection. |
 | **Director of Research** | Research and alternative perspectives | Live web research through xAI/Grok, with Claude web search as the assignment fallback when Grok is disconnected and Claude is connected. Requires a verified provider connection. |
-| **Creative Director** | Design direction, naming, copy and repository work | Cursor Cloud Agents for repository work, plus a shot-planning and video-rendering pipeline using DARK/ComfyUI or Grok Imagine. Each backend requires its own configuration and access. |
-| **Director of Operations** | Scoped execution and source-workspace coordination | Select **GPT-6-Sol** (`gpt-6-sol`) to run source work at **medium reasoning effort** through the local agent runtime. Assignments retain their manager/worker relationship in the task ledger. |
+| **Creative Director** | Design direction, naming, copy and repository work | Cursor Cloud Agents for repository work, plus a shot-planning and video-rendering pipeline with retained DARK/ComfyUI support. New production is gated, and motion rendering must use local models on DARK. Each backend requires its own configuration and access. |
+| **Director of Operations** | Scoped execution and source-workspace coordination | A configured compatible runtime model can be selected for source work. Availability and successful execution of `gpt-6-sol` are unverified here; new unbounded worker launches are blocked by the spending policy. Assignments retain their manager/worker relationship in the task ledger. |
 | **Director of Projects** | Planning and project coordination | Runs on a selected **Ollama model**, using the configured LAN server (DARK by default), with an optional Mac-local fallback for assignments. Produces plans and joins live board debates; its chat adapter cannot browse, edit files or run commands. |
 
-### Real questions. Real model replies. A recorded verdict.
+### Experimental board debates
 
 **Ask the board to debate a decision** by voice or use the boardroom debate control. Jarvis convenes the connected CTO (Claude), Research Director (Grok) and Projects Director (local Ollama). At least **two connected directors** are required.
 
@@ -78,11 +82,11 @@ The board gives each specialist a seat, a persona and a clear responsibility. Co
 
 > **Try:** “Jarvis, ask the board whether we should launch a native Mac app first or start with a web app.”
 
-The **Demo debate** remains available as a separately labeled, scripted animation preview. Live debates use actual provider responses. Creative and Operations run jobs rather than chat turns, so they do not participate in the current debate loop. A model's agreement verdict is an assessment of the discussion, not independent verification of its conclusions.
+The **Demo debate** remains available as a separately labeled, scripted animation preview. The live implementation requests provider responses; successful multi-provider operation remains unverified in this validation pass. Creative and Operations run jobs rather than chat turns, so they do not participate in the current debate loop. A model's agreement verdict is an assessment of the discussion, not independent verification of its conclusions.
 
 ### Local planning. Focused execution.
 
-| Projects · Ollama | Operations · GPT-6-Sol |
+| Projects · Ollama | Operations · configured runtime |
 | :--- | :--- |
 | Choose a model installed on the configured Ollama server; Jarvis checks its model list before saving it. | Set the manager to `gpt-6-sol` using the compatible local agent runtime. |
 | Turn a brief into milestones, responsibilities, risks and a concrete next move. | Source workers use the selected runtime manager model with `model_reasoning_effort="medium"`. |
@@ -96,7 +100,7 @@ Director hand-offs and task updates appear in place. Open a director's details t
 
 The **Results** view opens saved documents and plays finished videos inside Jarvis. During video jobs, the **Studio** shows the shot plan, renderer, live ComfyUI node and sampler progress, available GPU status, and completed-shot previews. Clips are joined into a final MP4 with AVFoundation, preserving available audio.
 
-Creative prefers **DARK's ComfyUI renderer** when its workflow is configured and the server is reachable. It can start ComfyUI over SSH using a saved start command, and can fall back to **Grok Imagine** when that provider is connected. The repository includes an LTX workflow test fixture; a working ComfyUI installation, model weights and an exported API workflow must be supplied separately.
+Creative prefers **DARK's ComfyUI renderer** when its workflow is configured and the server is reachable. It can start ComfyUI over SSH using a saved start command, but cloud video fallback is not authorized; motion rendering must stay on local DARK models. The repository includes an LTX workflow test fixture; a working ComfyUI installation, model weights and an exported API workflow must be supplied separately.
 
 ## From conversation to accountable work
 
@@ -120,7 +124,7 @@ The native shell hosts bundled HTML, CSS and JavaScript. Three.js provides the p
 
 | Layer | Purpose |
 | :--- | :--- |
-| `Sources/Jarvis/main.swift` | Native app lifecycle, frontend bridge, task orchestration and provider configuration. |
+| `Sources/Jarvis/main.swift` / `JarvisApp.swift` / `App*.swift` | CLI entry points, native lifecycle and state, with separate bridge, assignments, conversation, providers, Results, debate, video and voice modules. |
 | `CloudVoice.swift` / `ConversationBrain.swift` | Streaming audio and delegated model routing. |
 | `ClaudeClient.swift` / `GrokClient.swift` / `CursorClient.swift` | Specialist provider adapters. |
 | `TaskLedger.swift` / `Personas.swift` | Persistent task records and bundled executive personas. |
@@ -165,12 +169,14 @@ open dist/Jarvis.app
 
 1. Open **Settings**, connect OpenAI realtime voice through the native secure key field and select realtime conversation audio.
 2. Start a conversation and choose your conversation brain. Use Ollama for a local conversation path or Luna/Astra through the configured runtime.
-3. Open the board to configure the specialist providers you want to use. Select a model installed on the configured Ollama server for **Projects** and set **Operations** to `gpt-6-sol` for source work at medium reasoning effort. Provider seats require their connection checks.
+3. Open the board to configure the specialist providers you want to use. Select a model installed on the configured Ollama server for **Projects** and configure **Operations** only after its runtime and budget enforcement have been verified. Provider seats require their connection checks.
 4. Connect at least two speaking directors—CTO, Research or Projects—then ask Jarvis to put a question to the board.
 5. Select a local folder to explore its structure and available Graphify relationships.
 6. Save a project brief, discuss it with Jarvis and give a connected director a concrete assignment.
 
-### Optional: connect DARK and enable video rendering
+### Experimental: DARK and video configuration
+
+**New film launches are currently blocked by the spending guard.** The configuration below documents the retained experimental pipeline; configuration alone does not enable a bounded production run.
 
 DARK is the developer's LAN GPU server. Configure your own host before using its defaults. Private settings are stored under `~/Library/Application Support/Jarvis/`:
 
@@ -180,7 +186,7 @@ DARK is the developer's LAN GPU server. Configure your own host before using its
 
 Use **Settings → Connect DARK…** for the one-time SSH key setup in Terminal, then run the health check. This opens Terminal directly without requiring Automation permission; the server password is entered there and is not saved by Jarvis.
 
-Place your exported ComfyUI **API-format** workflow at `~/Documents/Jarvis Workspace/Video/comfyui-workflow-api.json`. Include `{{prompt}}` in the positive prompt; `{{frames}}`, `{{seconds}}` and `{{seed}}` can supply numeric inputs. Install the workflow's required nodes and models on the server. Then give Creative a video brief and follow its progress in Studio; finished media is available in Results. Grok Imagine rendering requires a connected xAI account and may incur provider charges.
+Place your exported ComfyUI **API-format** workflow at `~/Documents/Jarvis Workspace/Video/comfyui-workflow-api.json`. Include `{{prompt}}` in the positive prompt; `{{frames}}`, `{{seconds}}` and `{{seed}}` can supply numeric inputs. Install the workflow's required nodes and models on the server. After bounded production is implemented and verified, Creative can accept a video brief and expose progress in Studio; existing finished media remains available in Results. The retained Grok Imagine video adapter is blocked; it must not be used as a production fallback.
 
 This is an ad-hoc signed development app. Helper environments and the source workspace must remain available; a self-contained, notarized installer is a future milestone.
 
@@ -189,8 +195,8 @@ This is an ad-hoc signed development app. Helper environments and the source wor
 ```sh
 npm ci
 npm run build:presence
-npm test
-./scripts/check.sh
+npm run check:ui       # Fast: syntax, formatting and DOM behavior; no Swift or API calls
+./scripts/check.sh      # Full native, UI and film regressions
 ```
 
 Bundled frontend assets are committed, so a normal native build does not require rebuilding them with Node. The check script exercises compilation, turn detection, routing, voice activity, task records, provider parsing, debate prompts and verdicts, local Projects responses, Operations worker selection, personas, video planning and workflow handling, live progress, result media, token accounting and conversation UI behavior. These checks do not establish that every external provider is configured or available.
@@ -212,11 +218,11 @@ The ambition is a chief of staff who can help take an idea all the way to a revi
 
 - [ ] **Persistent project memory** — retrieve decisions, preferences, commitments and relevant files with source references.
 - [ ] **A dependable execution engine** — dependencies, retries, restart recovery and independently verified outcomes.
-- [x] **Live board debates** — connected directors, up to three rounds, a chair-assessed verdict and a saved outcome.
+- [ ] **Live-verified board debates** — connected directors, up to three rounds, a chair-assessed verdict and a saved outcome.
 - [x] **Local Projects director** — planning and debate participation through an installed Ollama model.
-- [x] **GPT-6-Sol Operations** — source workers follow the selected runtime manager at medium reasoning effort.
+- [ ] **Live-verified Operations model** — source workers follow the selected runtime manager at medium reasoning effort.
 - [ ] **Richer executive meetings** — evidence-backed decisions, broader participation and decisions that become reviewed project plans.
-- [x] **Live video Studio and Results** — shot progress, previews, in-app playback and document viewing.
+- [ ] **Budget-bounded video Studio production** — shot progress, previews, in-app playback and document viewing.
 - [x] **Recorded director token usage** — daily and all-time counts from supported provider responses and worker logs.
 - [ ] **Smarter model economics** — measured speed, token usage and budget-aware routing, with local models handling suitable work.
 - [ ] **Jarvis MCP and business tools** — scoped calendar, email and external application capabilities.

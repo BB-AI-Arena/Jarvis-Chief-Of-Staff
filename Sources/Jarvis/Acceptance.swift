@@ -1,6 +1,6 @@
 import Foundation
 
-/// Eleven realistic requests that must route correctly before a push. `Jarvis --acceptance` sends each through the live router.
+/// Realistic requests that must route correctly before a push. `Jarvis --acceptance` sends each through the live router.
 enum Acceptance {
     struct Case {
         let prompt: String
@@ -11,6 +11,7 @@ enum Acceptance {
         let directors: [String]
     }
     static let cases: [Case] = [
+        Case(prompt: "Verify the Drop Assassin video uses the real artwork", history: "", routes: ["reply", "assign"], directors: ["technology", "operations", "creative", "projects"]),
         Case(prompt: "Add drafting the launch plan to the task list.", history: "", routes: ["assign"], directors: []),
         Case(prompt: "Research the top three competitors in handyman scheduling software.", history: "", routes: ["assign"], directors: ["research"]),
         Case(prompt: "Have the board debate whether we should ship the handyman app this week.", history: "", routes: ["debate"], directors: []),
@@ -22,6 +23,8 @@ enum Acceptance {
         Case(prompt: "I've been going back and forth on pricing lately.", history: "", routes: ["reply", "suggest"], directors: []),
         Case(prompt: "Create a 30 second cinematic video about Drop Assassin in HD with heavy special effects.", history: "", routes: ["assign"], directors: ["creative"]),
         Case(prompt: "Fix your own UI so I can watch each director working when you hand off a task.", history: "", routes: ["assign", "task"], directors: ["operations"]),
+        Case(prompt: "Create a video about Drop Assassin based on the artwork in /home/bradshaw/services/collectibles-alert-engine/artwork/", history: "", routes: ["assign"], directors: ["creative"]),
+        Case(prompt: "Oh Jarvis, Creative Ten Second Video based on Drop Assassin artwork", history: "", routes: ["assign"], directors: ["creative"]),
         Case(prompt: "Yes, go ahead.", history: "assistant: Shall I add outlining a simple MVP for solo handymen to the task list for Projects?", routes: ["assign"], directors: [])
     ]
     /// Nil when the decision is acceptable, otherwise why it is not.

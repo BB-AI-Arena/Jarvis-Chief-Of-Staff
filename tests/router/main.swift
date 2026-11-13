@@ -20,3 +20,14 @@ assert(RouteDecision.memory(for: noted) == "First customers are solo handymen.")
 assert(RouteDecision.memory(for: assign) == nil)
 print("PASS: router replies are validated like every other brain; Jarvis is never a director and unknown routes are dropped")
 extension RouteDecision: Equatable { public static func == (a: RouteDecision, b: RouteDecision) -> Bool { a.route == b.route && a.text == b.text && a.director == b.director && a.task == b.task } }
+
+let next = JarvisRouter.nextStepPrompt(task: "task", director: "research", result: "done")
+assert(next.contains("Usually no follow-up") && next.contains("Never suggest verifying"))
+let taskReply = JarvisRouter.decision(from: reply("{\"route\":\"assign\",\"text\":\"On it\",\"task\":\"Summarize the supplied notes\",\"director\":\"projects\"}"))!
+assert(taskReply.task == "Summarize the supplied notes")
+print("PASS: router keeps task separate from speech and defaults to no follow-up")
+
+let completePrompt = String(repeating:"x",count:49000) + "TAIL_REQUIREMENT"
+let longBody = JarvisRouter.body(prompt:completePrompt,history:"earlier",system:"system")
+assert(((longBody["messages"] as! [[String:String]])[0]["content"]!).contains(completePrompt))
+assert(RouteDecision.limitsRule.contains("50,000"))

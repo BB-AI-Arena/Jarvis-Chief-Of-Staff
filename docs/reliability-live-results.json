@@ -1,0 +1,91 @@
+{
+  "finished": "2026-11-13T02:41:33Z",
+  "outcomes": [
+    {
+      "passed": true,
+      "result": "# Return exactly JARVIS_LIVE_TECHNOLOGY followed by one sentence explaining why a failed task must not be reported as completed. Do not use tools, browse, edit files, create branches or open a PR.\n\nChief Technology Officer \u00b7 2026-11-13T02:41:33Z\n\n---\n\nJARVIS_LIVE_TECHNOLOGY A failed task must not be reported as completed because the report would give Brandon false information, and he could then rely on work that was never finished or build on it.\n",
+      "savedResult": "2026-11-13 Return exactly JARVIS LIVE TECHNOLOGY followed by one 1ea60813.md",
+      "seat": "technology",
+      "state": "completed",
+      "summary": "JARVIS_LIVE_TECHNOLOGY A failed task must not be reported as completed because the report would give Brandon false information, and he could then rely on work that was never finished or build on it."
+    },
+    {
+      "passed": true,
+      "result": "# Return exactly JARVIS_LIVE_RESEARCH followed by one sentence explaining why a failed task must not be reported as completed. Do not use tools, browse, edit files, create branches or open a PR.\n\nDirector of Research \u00b7 2026-11-13T02:41:32Z\n\n---\n\nJARVIS_LIVE_RESEARCH A failed task must not be reported as completed because it would violate the requirement to deliver only verified, evidence-based results and would breach the explicit instruction against claiming completion without concrete findings or when blocked by unavailable tools.\n",
+      "savedResult": "2026-11-13 Return exactly JARVIS LIVE RESEARCH followed by one e799a6da.md",
+      "seat": "research",
+      "state": "completed",
+      "summary": "JARVIS_LIVE_RESEARCH A failed task must not be reported as completed because it would violate the requirement to deliver only verified, evidence-based results and would breach the explicit instruction against claiming completion without concrete findings or when blocked by unavailable tools."
+    },
+    {
+      "passed": false,
+      "result": "",
+      "savedResult": "",
+      "seat": "creative",
+      "state": "failed",
+      "summary": "Daily $10 director budget: this job has no enforceable maximum charge, so it was not started."
+    }
+  ],
+  "resultReadyEvents": 2,
+  "scope": "Real connection and delegateWork -> provider -> ledger -> saved Result. No microphone or visual playback assertion.",
+  "started": "2026-11-13T02:41:31Z",
+  "usage": {
+    "allTime": {
+      "research": {
+        "calls": 1,
+        "input": 1187,
+        "models": {
+          "grok-4.20-0309-non-reasoning": {
+            "calls": 1,
+            "input": 1187,
+            "output": 49
+          }
+        },
+        "output": 49,
+        "total": 1236
+      },
+      "technology": {
+        "calls": 1,
+        "input": 2725,
+        "models": {
+          "claude-sonnet-5-5": {
+            "calls": 1,
+            "input": 2725,
+            "output": 64
+          }
+        },
+        "output": 64,
+        "total": 2789
+      }
+    },
+    "day": "2026-11-12",
+    "today": {
+      "research": {
+        "calls": 1,
+        "input": 1187,
+        "models": {
+          "grok-4.20-0309-non-reasoning": {
+            "calls": 1,
+            "input": 1187,
+            "output": 49
+          }
+        },
+        "output": 49,
+        "total": 1236
+      },
+      "technology": {
+        "calls": 1,
+        "input": 2725,
+        "models": {
+          "claude-sonnet-5-5": {
+            "calls": 1,
+            "input": 2725,
+            "output": 64
+          }
+        },
+        "output": 64,
+        "total": 2789
+      }
+    }
+  }
+}

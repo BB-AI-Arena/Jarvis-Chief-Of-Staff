@@ -25,3 +25,7 @@ assert(run?.status == "FINISHED" && run?.result == "Done." && run?.pr == "https:
 assert(CursorClient.terminal.contains("FINISHED") && CursorClient.terminal.contains("ERROR") && !CursorClient.terminal.contains("RUNNING"))
 assert(CursorClient.parseRun(Data("{\"status\":\"RUNNING\"}".utf8))?.result == nil)
 print("PASS: Cursor cloud agents launch with the persona brief on a validated https repo and read only documented run states")
+
+let fullBrief = String(repeating:"a",count:25000) + "END_OF_OWNER_BRIEF"
+assert(CursorClient.prompt(persona:"P",brief:fullBrief).contains(fullBrief))
+print("PASS: Creative receives the complete long consultation brief without a silent cutoff")

@@ -17,3 +17,13 @@ assert(OllamaClient.sanitizeHost("http://192.168.4.31:11434/") == "http://192.16
 assert(OllamaClient.sanitizeHost("http://dark.local:8188") == "http://dark.local:8188")
 for bad in ["https://evil.example.com:11434", "http://user:pw@192.168.4.31:11434", "http://192.168.4.31:11434/api?x=1", "ftp://192.168.4.31", "http://8.8.8.8"] { assert(OllamaClient.sanitizeHost(bad) == nil, bad) }
 print("PASS: Projects talks to the 4090's Ollama by default and only accepts local-network model servers")
+
+let localLong = String(repeating:"x",count:50000)
+let longLocalBody = OllamaClient.requestBody(localLong,model:"qwen3.5:latest",system:"S")
+let longLocalMessages = longLocalBody["messages"] as! [[String:Any]]
+assert(OllamaClient.fitsContext(longLocalMessages,model:"qwen3.5:latest"))
+assert((longLocalBody["options"] as! [String:Int])["num_ctx"]! > 8192)
+assert(!OllamaClient.fitsContext([["role":"user","content":String(repeating:"x",count:270000)]],model:"qwen3.5:latest"))
+assert(!OllamaClient.fitsContext(longLocalMessages,model:"unknown-small-model"))
+assert(OllamaClient.text(from:Data("{\"done_reason\":\"length\",\"message\":{\"content\":\"cut off\"}}".utf8)) == nil)
+print("PASS: local input context grows for 50,000-character prompts and incomplete answers fail closed")

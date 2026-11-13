@@ -4,7 +4,7 @@ const path = require('node:path');
 let JSDOM;
 try { ({JSDOM}=require('jsdom')); } catch { ({JSDOM}=require('../.build/test-deps/node_modules/jsdom')); }
 const root = path.resolve(__dirname, '..');
-function workspace(mode) {
+function workspace(mode, saved = {}) {
   const dom = new JSDOM(fs.readFileSync(path.join(root, 'Resources/index.html'), 'utf8'), { url: 'https://jarvis.test/', runScripts: 'outside-only' });
   const w = dom.window;
   const calls = [];
@@ -13,6 +13,7 @@ function workspace(mode) {
   w.ResizeObserver = class { observe() {} };
   w.HTMLCanvasElement.prototype.getContext = () => ({});
   w.webkit = { messageHandlers: { jarvis: { postMessage: value => calls.push(value) } } };
+  for (const [key, value] of Object.entries(saved)) w.localStorage.setItem('jarvis.' + key, JSON.stringify(value));
   w.eval(fs.readFileSync(path.join(root, 'Resources/app.js'), 'utf8')+';window.testMouthPose=mouthPose;');
   calls.length = 0;
   return { w, calls };
@@ -70,9 +71,27 @@ assert.equal(w.testMouthPose(),null);
 console.log('PASS: actual audio time selects closed lips and rounded vowels; idle releases the mouth');
 w.receive({event:'cloudVoiceConfigured',data:true});
 w.document.getElementById('voiceSessionToggle').click();
-assert.equal(calls.at(-1).backend,'live');
+assert.equal(calls.at(-1).backend,'local');
 assert.equal(calls.at(-1).action,'microphone');
-console.log('PASS: Luna selection honors API streaming voice after a key is saved');
+assert.equal(calls.at(-1).voice,'bm_lewis');
+console.log('PASS: saving a realtime key does not silently replace Lewis');
+const legacy = workspace('workspace', { britishVoiceV1:true, voiceBackend:'live', voices:{Jarvis:'am_michael',Claude:'bm_george'} });
+assert.equal(legacy.w.localStorage.getItem('jarvis.voiceBackend'), '"local"');
+assert.equal(JSON.parse(legacy.w.localStorage.getItem('jarvis.voices')).Jarvis, 'bm_lewis');
+assert.equal(JSON.parse(legacy.w.localStorage.getItem('jarvis.voices')).Claude, 'bm_george');
+legacy.w.document.getElementById('voiceSessionToggle').click();
+assert.equal(legacy.calls.at(-1).backend, 'local');
+const jarvisVoice = legacy.w.document.querySelector('.seat.head select');
+jarvisVoice.value = 'bm_george';
+jarvisVoice.dispatchEvent(new legacy.w.Event('change'));
+legacy.w.document.getElementById('voiceSessionToggle').click();
+assert.equal(legacy.calls.at(-1).backend, 'local');
+assert.equal(legacy.calls.at(-1).voice, 'bm_george');
+legacy.w.receive({ event: 'conversation', data: { active: true } });
+legacy.w.receive({ event: 'reply', data: { text: 'A different British voice.', model: 'GPT Astra' } });
+assert.equal(legacy.calls.at(-1).voice, 'bm_george');
+legacy.w.close();
+console.log('PASS: saved live settings use Kokoro and microphone requests and replies honor the selected British voice');
 w.receive({event:'conversation',data:{active:true}});
 w.receive({event:'voiceStreaming',data:true});
 w.receive({event:'inputLevel',data:0.42});
@@ -192,7 +211,7 @@ console.log('PASS: active and recent tasks render, and Stop targets the running 
   assert.match(w.document.querySelector('.seat.creative').textContent, /Cursor · not connected/);
   w.receive({event:'creativeStatus', data:{connected:true, model:'', repo:'https://github.com/BB-AI-Arena/Jarvis-Chief-Of-Staff'}});
   const creative = w.document.querySelector('.seat.creative');
-  assert.match(creative.textContent, /Creative Director · Cursor/);
+  assert.match(creative.textContent, /Creative Director.*Cursor/);
   assert.match(creative.textContent, /Cursor · default model/);
   assert.match(creative.textContent, /github\.com\/BB-AI-Arena\/Jarvis-Chief-Of-Staff/);
   assert.doesNotMatch(creative.textContent, /Muse/);
@@ -334,3 +353,18 @@ console.log('PASS: active and recent tasks render, and Stop targets the running 
   console.log('PASS: the Projects seat runs on a chosen local Ollama model and its tasks are labelled Projects');
   w.close(); orb.w.close();
 })().catch(error => { console.error(error); process.exit(1); });
+
+const changedVoice = workspace('workspace');
+changedVoice.w.receive({event:'conversation',data:{active:true}});
+const jarvisVoicePicker = changedVoice.w.document.querySelector('#voiceGrid select');
+assert.ok(jarvisVoicePicker);
+jarvisVoicePicker.value='bm_george';
+jarvisVoicePicker.dispatchEvent(new changedVoice.w.Event('change'));
+assert.equal(changedVoice.calls.at(-1).action,'cancel');
+changedVoice.w.receive({event:'conversation',data:{active:false}});
+assert.equal(changedVoice.calls.at(-1).action,'microphone');
+assert.equal(changedVoice.calls.at(-1).backend,'local');
+assert.equal(changedVoice.calls.at(-1).voice,'bm_george');
+console.log('PASS: changing Jarvis’s voice restarts the active session on the selected local voice');
+
+changedVoice.w.close();
