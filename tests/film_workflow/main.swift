@@ -57,3 +57,32 @@ _ = app.createApprovedFilm()
 app.updateTask(app.loadFilmStory()!.taskID,state:"completed",summary:"Verified output file saved")
 app.refreshFilmStory();assert(app.loadFilmStory()!.phase=="completed")
 print("PASS: failed and finished production project actual task state while retaining exact owner authorization")
+
+// A locked Mac can receive a writing-only revision without fabricating UI approval.
+var rejected = app.loadFilmStory()!
+rejected.phase = "production_needs_attention"
+rejected.approvedHash = rejected.hash
+rejected.approvedAt = "historical-approval-time"
+app.saveFilmStory(rejected)
+let inbox = app.support.appendingPathComponent("story-revision-inbox")
+try! FileManager.default.createDirectory(at:inbox,withIntermediateDirectories:true)
+let request = StoryRevisionRequest(storyID:rejected.id,expectedHash:rejected.hash,feedback:"Immediate hook, real app captures, coherent story.")
+let requestFile = inbox.appendingPathComponent(request.id + ".json")
+try! JSONEncoder().encode(request).write(to:requestFile)
+app.consumeStoryRevisionRequests()
+let revision = app.loadFilmStory()!
+assert(revision.phase == "draft" && revision.approvedHash.isEmpty && revision.approvedAt.isEmpty)
+assert(revision.script == rejected.script && revision.brief == rejected.brief)
+assert(revision.history.contains(where:{$0.contains("Historical production approval:")}))
+assert(app.ledger.rows.first(where:{$0.id==revision.taskID})!.instructions.contains(request.feedback))
+assert(app.dispatched.last == "creative")
+let countAfterRevision = app.dispatched.count
+app.consumeStoryRevisionRequests()
+assert(app.dispatched.count == countAfterRevision)
+let previous = app.support.appendingPathComponent("story-revision-history/" + request.id + "/previous-story.json")
+assert(try! JSONDecoder().decode(FilmStory.self,from:Data(contentsOf:previous)).approvedHash == rejected.approvedHash)
+let stale = StoryRevisionRequest(storyID:rejected.id,expectedHash:"outdated",feedback:"Stale request")
+try! JSONEncoder().encode(stale).write(to:inbox.appendingPathComponent(stale.id + ".json"))
+app.consumeStoryRevisionRequests()
+assert(app.dispatched.count == countAfterRevision && app.loadFilmStory()!.taskID == revision.taskID)
+print("PASS: local revision inbox archives historical approval, dispatches actual Creative once, rejects stale requests and never starts production")

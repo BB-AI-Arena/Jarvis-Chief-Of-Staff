@@ -170,14 +170,38 @@ extension JarvisApp {
         return "I have assigned the approved screenplay to Creative for film production."
     }
     func reviseFilmStory(_ id: String, feedback: String) {
-        guard var story = loadFilmStory(),story.id == id,story.phase == "awaiting_approval",!feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
-        story.feedback = feedback;story.round = 1;story.viewedHash = "";story.approvedHash = ""
+        guard var story = loadFilmStory(),story.id == id,["awaiting_approval","production_needs_attention","completed"].contains(story.phase),!feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
+        if !story.approvedHash.isEmpty {
+            story.history.append("Historical production approval: " + story.approvedHash + " at " + story.approvedAt + ". Owner requested a new revision; this authorization does not apply to the replacement.")
+        }
+        story.feedback = feedback;story.round = 1;story.viewedHash = "";story.approvedHash = "";story.approvedAt = ""
         story.history.append("Owner requested revisions: " + feedback)
         story.taskID = storyTask("Writing only: revise the complete screenplay below in consultation with Research. Do not generate assets, render, publish, modify code, or start production. Return the full revised screenplay under 24,000 characters. Begin with a standalone plain-text line RUNTIME_SECONDS: N (full runtime in seconds, 15 through 600). Preserve the owner brief and apply the requested changes. Research will review your revision before it returns to Brandon.\nOWNER BRIEF:\n" + story.brief + "\nOWNER FEEDBACK:\n" + feedback + "\nCURRENT SCREENPLAY:\n" + story.script,seat:"creative")
         story.phase = "draft"
         guard saveFilmStory(story) else { return }
         updateTask(id,state:"running",summary:"Owner requested revisions; Creative and Research are consulting again.")
         dispatch("creative")
+    }
+
+    /// Poll a user-owned local inbox, independent of WebKit readiness or screen lock.
+    func consumeStoryRevisionRequests() {
+        let inbox = support.appendingPathComponent("story-revision-inbox")
+        let files = (try? FileManager.default.contentsOfDirectory(at:inbox,includingPropertiesForKeys:nil)) ?? []
+        for file in files.filter({$0.pathExtension == "json"}).sorted(by:{$0.lastPathComponent < $1.lastPathComponent}) {
+            guard let data = try? Data(contentsOf:file),let request = try? JSONDecoder().decode(StoryRevisionRequest.self,from:data),
+                  UUID(uuidString:request.id) != nil,let story = loadFilmStory(),story.id == request.storyID,story.hash == request.expectedHash,
+                  ["awaiting_approval","production_needs_attention","completed"].contains(story.phase),
+                  !request.feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { continue }
+            let archive = support.appendingPathComponent("story-revision-history/" + request.id)
+            do {
+                try FileManager.default.createDirectory(at:archive,withIntermediateDirectories:true)
+                try JSONEncoder().encode(story).write(to:archive.appendingPathComponent("previous-story.json"),options:.atomic)
+                try FileManager.default.moveItem(at:file,to:archive.appendingPathComponent("request.json"))
+            } catch { continue }
+            reviseFilmStory(story.id,feedback:request.feedback)
+            let accepted = loadFilmStory()?.phase == "draft"
+            try? Data((accepted ? "Writing-only revision queued" : "Revision not queued; inspect saved workflow").utf8).write(to:archive.appendingPathComponent("status.txt"),options:.atomic)
+        }
     }
 
 }

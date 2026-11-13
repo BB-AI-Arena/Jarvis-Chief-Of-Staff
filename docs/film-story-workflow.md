@@ -19,3 +19,15 @@ New film subprocesses send their paid Claude planning/review and optional xAI st
 The xAI still-edit bound uses explicit medium/2K/one-output settings: $0.08 output plus $0.01 per input image, verified against https://docs.x.ai/developers/models/grok-imagine-image-2.0 on November 12, 2026. Pricing expires with the native budget policy. This is a still-image charge, not video rendering.
 
 Focused tests: `tests/film_workflow/main.swift`, `tests/film_broker/main.swift`, and `tests/check_voice_chunks.py`. The workflow test executes real stage transitions with disposable director results and never calls providers or manufactures live consensus.
+
+## Writing-only revision while the screen is locked
+
+The running app polls a private local revision inbox independently of WebKit readiness. Submit the owner's complete feedback with:
+
+```sh
+/Applications/Jarvis.app/Contents/MacOS/Jarvis --story-revision-request /absolute/path/to/feedback.txt
+```
+
+This queues a version-bound writing request; it does not unlock the Mac or authorize production. Jarvis must be running. The app accepts revisions only for awaiting-approval, completed or production-needs-attention stories. It archives the previous workflow and request, preserves the historical approval record, clears the replacement's approval, and dispatches Creative through the existing consultation workflow. Stale screenplay versions cannot start another consultation. A replacement still requires review and fresh owner approval of its exact version. Processing status is retained in the private story-revision-history directory.
+
+The workflow regression checks old approval preservation, once-only dispatch, full feedback delivery and stale request rejection.

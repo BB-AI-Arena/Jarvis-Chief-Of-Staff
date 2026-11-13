@@ -89,6 +89,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     var videoJobs: [String: VideoPlan.Progress] = [:]
     var filmWorkers: [String:Process] = [:]
     var filmStoryTimer: Timer?
+    var storyRevisionTimer: Timer?
     var externalFilmTimer: Timer?
     var externalFilms: [String:URL] = [:]
     /// What each director is doing right now, so a reloaded page can redraw the board.
@@ -131,6 +132,11 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
         refreshCursor(announce: false)
         refreshGrok(announce: false)
         OllamaClient.models { [weak self] names in self?.serverModels = names ?? [] }
+        consumeStoryRevisionRequests()
+        storyRevisionTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in
+            self?.consumeStoryRevisionRequests()
+            self?.refreshFilmStory()
+        }
         brain.warm()
         NSApp.setActivationPolicy(.regular)
         let menu = NSMenu()

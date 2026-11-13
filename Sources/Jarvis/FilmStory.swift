@@ -54,3 +54,11 @@ struct FilmStory: Codable {
     }
 }
 
+
+/// Local writing-only request; stale screenplay versions cannot restart consultation.
+struct StoryRevisionRequest: Codable {
+    var id = UUID().uuidString
+    let storyID: String
+    let expectedHash: String
+    let feedback: String
+}
