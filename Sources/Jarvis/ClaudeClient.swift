@@ -94,7 +94,7 @@ enum ClaudeClient {
             if supportsFallback(model) { request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta") }
             var body: [String: Any] = ["model": model, "max_tokens": maxTokens, "system": system, "messages": messages]
             if writingOnlyThinking { body["thinking"] = ["type": model == "claude-sonnet-5-5" ? "between_tools" : "disabled"] }
-            if remaining > 0 { body["tools"] = tools }
+            if remaining > 0 && !tools.isEmpty { body["tools"] = tools }
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
             BudgetHTTP.dataTask(with: request, seat: meterTag) { data, response, error in
                 TokenMeter.record(meterTag, model: model, data: data)
@@ -109,7 +109,7 @@ enum ClaudeClient {
                         completion(nil);return
                     }
                     if json["stop_reason"] as? String == "max_tokens" {
-                        guard toolUses(blocks).isEmpty, pages.append(searchReport(blocks),limited:true) == .more else { diagnostic?("Claude response limit: blocks=" + blocks.compactMap { $0["type"] as? String }.joined(separator:",") + ", textCharacters=" + String(searchReport(blocks)?.count ?? 0) + ", toolCalls=" + String(toolUses(blocks).count) + ". No complete result was accepted.");completion(nil);return }
+                        guard toolUses(blocks).isEmpty, pages.append(searchReport(blocks),limited:true) == .more else { diagnostic?("Claude response limit: requestedModel=" + model + ", thinking=" + ((body["thinking"] as? [String:String])?["type"] ?? "default") + ", tools=" + String((body["tools"] as? [[String:Any]])?.count ?? 0) + ", responseModel=" + (json["model"] as? String ?? "unknown") + ", stop=" + (json["stop_reason"] as? String ?? "unknown") + ", usage=" + String(describing:json["usage"] as? [String:Int] ?? [:]) + ", blocks=" + blocks.compactMap { $0["type"] as? String }.joined(separator:",") + ", textCharacters=" + String(searchReport(blocks)?.count ?? 0) + ", toolCalls=" + String(toolUses(blocks).count) + ". No complete result was accepted.");completion(nil);return }
                         messages.append(["role":"assistant","content":blocks])
                         messages.append(["role":"user","content":continueAnswer])
                         round(remaining);return

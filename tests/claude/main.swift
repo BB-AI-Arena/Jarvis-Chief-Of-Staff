@@ -97,6 +97,6 @@ assert(PageProtocol.lastDiagnostic.contains("Rate limit reached"))
 assert(!PageProtocol.lastDiagnostic.contains("not-a-real-key"))
 PageProtocol.errorResponse = false
 assert(exercisePages(forever:false,writingOnlyThinking:true) == "First page\nFinal page")
-assert(PageProtocol.bodies.allSatisfy { ($0["thinking"] as? [String:String])?["type"] == "between_tools" })
+assert(PageProtocol.bodies.allSatisfy { ($0["thinking"] as? [String:String])?["type"] == "between_tools" && $0["tools"] == nil })
 URLProtocol.unregisterClass(PageProtocol.self)
 print("PASS: real client continues a limited response, retains its prior context, and refuses exhausted partial output")
