@@ -43,3 +43,4 @@ swiftc Sources/Jarvis/LiveUI.swift Sources/Jarvis/ResultMedia.swift Sources/Jarv
 .build/check-live
 npm test
 python3 -m py_compile scripts/voice.py scripts/visemes.py
+python3 scripts/screenplay.py check
