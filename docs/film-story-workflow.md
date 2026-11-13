@@ -9,3 +9,13 @@ The agreed screenplay and consultation record appear in Results. Its task offers
 This gate authorizes production; it does not certify the resulting film's creative fidelity. Whole-film continuity, product claims, anatomy and readable text still require review of the produced edit. Existing render limitations and media-quality checks remain applicable.
 
 Tests: `tests/film_story/main.swift`, included in `scripts/check.sh`. The production build and normal JavaScript/native checks also apply. Do not commit runtime briefs, credentials or private consultation checkpoints.
+
+## Owner rendering policy and budget bridge (November 12, 2026)
+
+Video generation is local-only on DARK's RTX 4090 (ComfyUI/LTX). Unavailability stops the job; cloud/frontier video generation is disabled at the legacy renderer entry point as well. Claude Opus 5.5 writes/directs and Grok 4.7 reviews the screenplay; these prose roles do not render video.
+
+New film subprocesses send their paid Claude planning/review and optional xAI still-image repair calls through the installed app's `--film-provider-request` broker. It allowlists the exact provider paths and bounded payloads, reads credentials internally, refuses redirects, and shares Creative's persisted daily allowance. A missing broker or an unpriced request fails closed. Motion remains local even when a still needs repair. Budget exhaustion retains the checkpoint and reports a blocker; approval is never fabricated or re-requested merely to retry the same unchanged approved version.
+
+The xAI still-edit bound uses explicit medium/2K/one-output settings: $0.08 output plus $0.01 per input image, verified against https://docs.x.ai/developers/models/grok-imagine-image-2.0 on November 12, 2026. Pricing expires with the native budget policy. This is a still-image charge, not video rendering.
+
+Focused tests: `tests/film_workflow/main.swift`, `tests/film_broker/main.swift`, and `tests/check_voice_chunks.py`. The workflow test executes real stage transitions with disposable director results and never calls providers or manufactures live consensus.

@@ -4,7 +4,9 @@ import AVFoundation
 import Speech
 
 
-if CommandLine.arguments.contains("--core-live-check") {
+if CommandLine.arguments.contains("--film-provider-request") {
+    FilmProviderBroker.run()
+} else if CommandLine.arguments.contains("--core-live-check") {
     CoreLiveCheck.run()
     dispatchMain()
 } else if CommandLine.arguments.contains("--self-test") {

@@ -8,6 +8,7 @@ enum SpendBudget {
     static var directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis/Budgets")
     static let dailyMicroUSD = 10_000_000
     static var allowsUnboundedJobs: Bool { false }
+    static var allowsBudgetedFilm: Bool { true }
     static let blocked = "Daily $10 director budget: this job has no enforceable maximum charge, so it was not started."
     struct Hold: Codable { var seat: String; var microUSD: Int }
     struct State: Codable { var day: String; var reserved: [String: Int]; var holds: [String: Hold]? = [:] }
@@ -57,6 +58,14 @@ enum SpendBudget {
         let tools = body["tools"] as? [[String: Any]] ?? []
         guard tools.allSatisfy({ $0["type"] == nil || ($0["type"] as? String) == "function" }),
               !String(decoding: data, as: UTF8.self).contains("cache_control") else { return nil }
+        // xAI official model pricing, verified 2026-11-12: medium 2K output $0.08,
+        // plus $0.01 per reference image. Reserve the full fixed charge, never refund it.
+        if request.url?.absoluteString == "https://api.x.ai/v1/images/edits", model == "grok-imagine-image-2.0" {
+            guard body["n"] as? Int == 1,body["quality"] as? String == "medium",body["resolution"] as? String == "2k",
+                  let images = body["images"] as? [[String:Any]],(1...5).contains(images.count),
+                  images.allSatisfy({ ($0["type"] as? String) == "image_url" && ($0["url"] as? String)?.hasPrefix("data:image/") == true }) else { return nil }
+            return 80_000 + images.count * 10_000
+        }
         let output = (body["max_tokens"] as? Int) ?? (body["max_output_tokens"] as? Int)
         guard let output, output > 0, output <= 32000 else { return nil }
         switch (request.url?.host, model) {
@@ -116,7 +125,7 @@ enum SpendBudget {
 
 /// Denials still complete exactly once, without sending the authenticated request.
 enum BudgetHTTP {
-    static func dataTask(with request: URLRequest, seat: String?, completionHandler: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask {
+    static func dataTask(with request: URLRequest, seat: String?, session: URLSession = .shared, completionHandler: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask {
         guard let ticket = SpendBudget.authorize(request, seat: seat) else {
             let task = URLSession.shared.dataTask(with: URL(string: "about:blank")!)
             task.cancel()
@@ -126,7 +135,7 @@ enum BudgetHTTP {
             }
             return task
         }
-        return URLSession.shared.dataTask(with: request) { data, response, error in
+        return session.dataTask(with: request) { data, response, error in
             if error == nil, let status = (response as? HTTPURLResponse)?.statusCode,
                (200..<300).contains(status), let actual = SpendBudget.responseCost(request, data: data) {
                 SpendBudget.settle(ticket, actualMicroUSD: actual)

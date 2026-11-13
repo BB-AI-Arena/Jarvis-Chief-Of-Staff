@@ -51,17 +51,11 @@ struct GrokVideo: ShotRenderer {
         return request
     }
     func render(_ shot: VideoPlan.Shot, to file: URL, isCancelled: @escaping () -> Bool, completion: @escaping (URL?, String?) -> Void) {
-        BudgetHTTP.dataTask(with: request("/videos/generations", body: GrokVideo.body(shot, model: model, resolution: resolution, aspect: aspect, referenceImages: referenceImages)), seat: "creative") { data, response, _ in
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-            guard status == 200, let id = json?["request_id"] as? String else {
-                let message = (json?["error"] as? String) ?? ((json?["error"] as? [String: Any])?["message"] as? String) ?? ""
-                onMain { completion(nil, "Grok Imagine did not start the shot (HTTP \(status))" + (message.isEmpty ? "" : ": " + String(message.prefix(160)))) }
-                return
-            }
-            self.wait(id, file: file, started: Date(), isCancelled: isCancelled, completion: completion)
-        }.resume()
+        // Owner policy: every video is rendered by local models on DARK's RTX 4090.
+        // Retain legacy response parsers for saved history, but never launch a cloud video.
+        onMain { completion(nil, "Cloud video rendering is disabled. Video must render locally on DARK RTX 4090.") }
     }
+
     private func wait(_ id: String, file: URL, started: Date, isCancelled: @escaping () -> Bool, completion: @escaping (URL?, String?) -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
             if isCancelled() { return }

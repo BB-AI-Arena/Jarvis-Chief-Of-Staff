@@ -13,14 +13,14 @@ extension JarvisApp {
         return json
     }
     func startVideo(_ parent: TaskRecord) {
-        guard SpendBudget.allowsUnboundedJobs else {
+        guard SpendBudget.allowsBudgetedFilm else {
             updateTask(parent.id, state: "failed", summary: SpendBudget.blocked)
             send("notice", SpendBudget.blocked)
             return
         }
 
-        if let story = loadFilmStory(), parent.id == story.taskID || parent.instructions.localizedCaseInsensitiveContains("Story consultation") || parent.instructions.contains("APPROVED SHA256:") {
-            guard !story.approvedHash.isEmpty,story.approvedHash == story.hash,story.hash == FilmStory.digest(story.script),parent.id == story.taskID,story.phase == "rendering" else {
+        if let story = loadFilmStory() {
+            guard story.canRender(task:parent.id) else {
                 updateTask(parent.id,state:"proposed",summary:"Production is waiting for owner approval of the exact agreed screenplay; no rendering started.")
                 say("That screenplay has not been approved for production. I will bring the agreed story to you first.");return
             }
@@ -141,7 +141,7 @@ extension JarvisApp {
                 }
                 if let comfy=engine as? ComfyVideo,!comfy.artwork.isEmpty {
                     guard let script=Bundle.main.url(forResource:"film_supervisor",withExtension:"py") else { finish(nil,"The local film engine is missing from this build.");return }
-                    let spec=LocalFilmWorker.spec(brief:brief,seconds:total,artwork:comfy.artwork,workflow:comfy.workflow,server:server,dark:dark,project:self.project,model:self.claudeModel,clientID:comfy.clientID)
+                    let spec=LocalFilmWorker.spec(brief:brief,seconds:total,artwork:comfy.artwork,workflow:comfy.workflow,server:server,dark:dark,project:self.project,model:self.cursorModel.hasPrefix("claude-") ? self.cursorModel : self.claudeModel,clientID:comfy.clientID)
                     var ended=false
                     self.filmWorkers[taskID]=LocalFilmWorker.start(spec:spec,folder:folder,project:self.project,script:script,event:{ event in
                         guard !cancelled() else { return }

@@ -20,13 +20,21 @@ extension JarvisApp {
     }
     func refreshFilmStory() {
         guard var story = loadFilmStory() else { return }
-        guard !["awaiting_approval","approved","rendering","needs_attention","cancelled"].contains(story.phase) else { return }
+        if story.phase == "rendering",let task = ledger.load().first(where:{$0.id == story.taskID}) {
+            if ["failed","cancelled","completed"].contains(task.state) {
+                story.phase = task.state == "completed" ? "completed" : "production_needs_attention"
+                story.feedback = task.resultSummary
+                _ = saveFilmStory(story)
+            }
+            return
+        }
+        guard !["awaiting_approval","approved","rendering","needs_attention","production_needs_attention","completed","cancelled"].contains(story.phase) else { return }
         func assign(_ phase: String, seat: String, prompt: String) {
             story.phase = phase
             story.taskID = storyTask(prompt,seat:seat)
             if saveFilmStory(story) { dispatch(seat) }
         }
-        let rules = """
+        let rules = (story.sourceEvidence.map { "CURRENT LOCAL SOURCE EVIDENCE (requirements are not automatically shipped):\n" + $0 + "\n" } ?? "") + """
         Handoff integrity: you are receiving the complete saved deliverable, not the task-list summary. Review it through its final line. Prior research critiques are advisory and may contain mistakes; verify them against the OWNER BRIEF rather than adopting them as new requirements. The member-owned target, offer, acceptance and reciprocal contact-sharing sequence is already required; do not ask Brandon whether to include it. Do not invent a latency threshold for the earlier failed alert. A collector scans an item he already owns; it can be a different item from the chase he is hunting. Never require him to already own the missing target. Do not invent collectible names, edition sizes, MSRP, market values or coverage percentages as verified facts. Use verified references or explicitly labeled production placeholders.
         This is a writing-only consultation between Jarvis's Creative Director and Director of Research. Do not render, generate assets, launch production, modify code or publish anything. Brandon must approve the exact final screenplay first. Return the complete deliverable in your final reply, not only a link or a summary. Keep it below 24,000 characters. The user brief is authoritative product direction; separate upcoming concepts from released and measured claims. Never invent delivery latency measurements or general accusations about competitors. A fictional character may experience a late alert. Preserve the user's intended value proposition. Any readable screens/signs must later use captured or explicitly typeset text, never generated gibberish. Maintain one young ADULT protagonist, coherent causal scenes, exact collectible identity, natural anatomy and consistent ownership. No budgets or APIs may be changed.\n
         """
@@ -101,6 +109,8 @@ extension JarvisApp {
     func resumeSavedFilmStory() -> String {
         guard var story = loadFilmStory() else { return "There is no saved film consultation yet." }
         if story.phase == "awaiting_approval" { openResult(story.id);return "The directors' agreed screenplay is saved in Results and awaiting your approval. Production has not started." }
+        if story.phase == "production_needs_attention" { return "Your exact screenplay approval is retained. Production needs attention: " + story.feedback }
+        if story.phase == "completed" { return "The approved film task has completed. Its saved result is in Results; completion alone does not certify creative quality." }
         if ["approved","rendering"].contains(story.phase) { return "The approved screenplay is already assigned for production. I will report its recorded status." }
         if ["research","draft","review","confirm"].contains(story.phase),let current = ledger.load().first(where:{$0.id == story.taskID}),["running","proposed"].contains(current.state) {
             return "I have your complete saved brief and latest screenplay. The existing consultation is still " + story.phase + "; I have not started a duplicate writing job."
@@ -109,14 +119,14 @@ extension JarvisApp {
         story.script = FilmStory.screenplay(story.script);story.hash = FilmStory.digest(story.script)
         story.history.append("Owner resumed the saved consultation. Previous progress-only returns do not establish a completed review or a disagreement. Full original brief and current screenplay retained.")
         story.round = 1;story.reviewDeliveryFailures = 0;story.viewedHash = ""
-        story.taskID = storyTask(StoryReview.contract + "\nReview the complete saved screenplay now. Research progress notes from earlier failed deliveries are not findings. Use the supplied owner brief and evidence, preserve the full concept vision and identify only concrete unresolved issues. Do not generate film assets.\nSCREENPLAY SHA256: " + story.hash + "\nOWNER BRIEF:\n" + story.brief + "\nSOURCE EVIDENCE:\n" + story.research + "\nCOMPLETE CURRENT SCREENPLAY:\n" + story.script,seat:"research")
+        story.taskID = storyTask(StoryReview.contract + "\nReview the complete saved screenplay now. Research progress notes from earlier failed deliveries are not findings. Use the supplied owner brief and evidence, preserve the full concept vision and identify only concrete unresolved issues. Do not generate film assets.\nSCREENPLAY SHA256: " + story.hash + "\nOWNER BRIEF:\n" + story.brief + "\nSOURCE EVIDENCE:\n" + story.research + "\nCURRENT LOCAL SOURCE DOCUMENTS:\n" + (story.sourceEvidence ?? "No added local source packet.") + "\nCOMPLETE CURRENT SCREENPLAY:\n" + story.script,seat:"research")
         story.phase = "review";story.feedback = "A complete version-bound Research review is pending; no director disagreement has been established by the earlier progress notes."
         guard saveFilmStory(story) else { return "The consultation could not be saved; no duplicate job was started." }
         dispatch("research")
         return "I still have your complete original brief and current screenplay. I have resumed Research's full review with Grok 4.7; Creative will address its concrete findings before I bring the agreed version to you."
     }
     func isApprovedFilmRequest(_ text: String) -> Bool {
-        guard let story = loadFilmStory(),story.phase == "approved" else { return false }
+        guard let story = loadFilmStory(),["approved","production_needs_attention"].contains(story.phase) else { return false }
         let lower = text.lowercased()
         return ["make the movie","make the film","render the film","produce the film","film from the approved","video from the approved"].contains { lower.contains($0) }
     }
@@ -139,15 +149,15 @@ extension JarvisApp {
         if announce { say(outcome) };return outcome
     }
     func createApprovedFilm() -> String {
-        guard var story = loadFilmStory(),story.phase == "approved",!story.approvedHash.isEmpty,story.approvedHash == story.hash,story.hash == FilmStory.digest(story.script) else { return "Film production requires your approval of the exact agreed screenplay first." }
-        guard SpendBudget.allowsUnboundedJobs else {
+        guard var story = loadFilmStory(),["approved","production_needs_attention"].contains(story.phase),!story.approvedHash.isEmpty,story.approvedHash == story.hash,story.hash == FilmStory.digest(story.script) else { return "Film production requires your approval of the exact agreed screenplay first." }
+        guard SpendBudget.allowsBudgetedFilm else {
             story.feedback = "Your approval is saved for this exact screenplay. " + SpendBudget.blocked
             _ = saveFilmStory(story)
             updateTask(story.id,state:"proposed",summary:story.feedback)
             return story.feedback
         }
         let hash = story.hash,id = story.id
-        let brief = "Create a \(story.runtime!) second film from Brandon's APPROVED SCREENPLAY below. Follow its plot, dialogue, narration, cast, collectible ownership, claims and scene order exactly. Do not invent another story or alter these commitments. Source clips may be subdivided for rendering while preserving the approved actions. Use approved Drop Assassin artwork and exact character references. Render on DARK. Use captured or typeset readable UI/text; never synthesize lettering. Do not silently simplify approved essential actions. If the approved screenplay cannot be produced faithfully, report the blocker before substituting scenes.\nAPPROVED SHA256: " + hash + "\n\n" + story.script
+        let brief = "Create a \(story.runtime!) second film from Brandon's APPROVED SCREENPLAY below. Follow its plot, dialogue, narration, cast, collectible ownership, claims and scene order exactly. Do not invent another story or alter these commitments. Source clips may be subdivided for rendering while preserving the approved actions. Use approved Drop Assassin artwork and exact character references. Render video only with local models on DARK RTX 4090; never call a frontier/cloud video generator or use a cloud video fallback. Stop and report if DARK is unavailable. Use captured or typeset readable UI/text; never synthesize lettering. Do not silently simplify approved essential actions. If the approved screenplay cannot be produced faithfully, report the blocker before substituting scenes.\nAPPROVED SHA256: " + hash + "\n\n" + story.script
         let task = storyTask(brief,seat:"creative")
         // Rendering intentionally uses a different title from writing-only consultations.
         var records = ledger.load()

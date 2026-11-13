@@ -5,7 +5,18 @@ swift build -c release
 app="$PWD/dist/Jarvis.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp .build/release/Jarvis "$app/Contents/MacOS/Jarvis"
-ditto Resources "$app/Contents/Resources"
+# Rebuild generated resources so removed source assets and Python caches cannot survive upgrades.
+python3 - "$app/Contents/Resources" <<'PYRESOURCES'
+from pathlib import Path
+import shutil, sys
+source = Path('Resources').resolve()
+destination = Path(sys.argv[1]).resolve()
+expected = Path('dist/Jarvis.app/Contents/Resources').resolve()
+assert destination == expected and source != destination
+if destination.exists():
+    shutil.rmtree(destination)
+shutil.copytree(source, destination, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.DS_Store'))
+PYRESOURCES
 if [[ ! -f Resources/Jarvis.icns ]]; then
     mkdir -p .build/Jarvis.iconset
     swift scripts/icon.swift .build/icon.png

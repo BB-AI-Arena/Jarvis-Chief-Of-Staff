@@ -176,7 +176,7 @@ open dist/Jarvis.app
 
 ### Experimental: DARK and video configuration
 
-**New film launches are currently blocked by the spending guard.** The configuration below documents the retained experimental pipeline; configuration alone does not enable a bounded production run.
+**Film production requires approval of the exact saved screenplay and available budget.** Motion rendering is restricted to local models on DARK. Paid planning/review and supported still-image repairs pass through the native Creative budget broker; missing broker or unknown pricing stops the request. This experimental path has regression coverage, not a completed production-film acceptance claim.
 
 DARK is the developer's LAN GPU server. Configure your own host before using its defaults. Private settings are stored under `~/Library/Application Support/Jarvis/`:
 
@@ -186,7 +186,7 @@ DARK is the developer's LAN GPU server. Configure your own host before using its
 
 Use **Settings → Connect DARK…** for the one-time SSH key setup in Terminal, then run the health check. This opens Terminal directly without requiring Automation permission; the server password is entered there and is not saved by Jarvis.
 
-Place your exported ComfyUI **API-format** workflow at `~/Documents/Jarvis Workspace/Video/comfyui-workflow-api.json`. Include `{{prompt}}` in the positive prompt; `{{frames}}`, `{{seconds}}` and `{{seed}}` can supply numeric inputs. Install the workflow's required nodes and models on the server. After bounded production is implemented and verified, Creative can accept a video brief and expose progress in Studio; existing finished media remains available in Results. The retained Grok Imagine video adapter is blocked; it must not be used as a production fallback.
+Place your exported ComfyUI **API-format** workflow at `~/Documents/Jarvis Workspace/Video/comfyui-workflow-api.json`. Include `{{prompt}}` in the positive prompt; `{{frames}}`, `{{seconds}}` and `{{seed}}` can supply numeric inputs. Install the workflow's required nodes and models on the server. After the exact screenplay is approved and the local renderer is ready, Creative can expose production progress in Studio; existing finished media remains available in Results. The retained Grok Imagine video adapter is blocked; it must not be used as a production fallback.
 
 This is an ad-hoc signed development app. Helper environments and the source workspace must remain available; a self-contained, notarized installer is a future milestone.
 

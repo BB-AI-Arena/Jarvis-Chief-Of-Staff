@@ -4,7 +4,7 @@ import Foundation
 /// The worker reads the unchanged jarvis-keys helper directly on this Mac.
 enum LocalFilmWorker {
     // Internal dependency seam for a no-network worker fixture; production uses the monetary gate.
-    static var canStart: () -> Bool = { SpendBudget.allowsUnboundedJobs }
+    static var canStart: () -> Bool = { SpendBudget.allowsBudgetedFilm }
     static func tokenBudget(seconds:Int)->Int { max(150_000,min(600,max(0,seconds))*20_000/3) }
     static func spec(brief:String,seconds:Int,artwork:[VideoArtwork.Reference],workflow:[String:Any],server:String,dark:DarkServer,project:URL,model:String,clientID:String)->[String:Any] {
         ["brief":brief,"seconds":seconds,"artwork":artwork.map { ref -> [String:Any] in
@@ -24,6 +24,9 @@ enum LocalFilmWorker {
         let process=Process(),pipe=Pipe()
         process.executableURL=project.appendingPathComponent(".voice/bin/python")
         process.arguments=["-B",script.path,"--job",folder.appendingPathComponent("job.json").path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["JARVIS_FILM_BUDGET_BROKER"] = Bundle.main.executableURL?.path
+        process.environment = environment
         process.currentDirectoryURL=project
         process.standardInput=FileHandle.nullDevice;process.standardOutput=pipe
         let log=folder.appendingPathComponent("worker-stderr.log")

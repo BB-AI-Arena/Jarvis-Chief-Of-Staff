@@ -8,6 +8,7 @@ struct FilmStory: Codable {
     var taskID = ""
     var round = 0
     var reviewDeliveryFailures: Int? = nil
+    var sourceEvidence: String? = nil
     var research = ""
     var script = ""
     var feedback = ""
@@ -33,9 +34,9 @@ struct FilmStory: Codable {
         // Match a complete owner statement, never an approval word embedded in instructions,
         // quoted dialogue, a question, a condition, or approval of some unrelated task.
         let subject = "(?:(?:this|the)(?: exact| agreed| current)? (?:screenplay|script|story|storyline)(?: version)?)"
-        let approval = "(?:(?:i )?approve(?: " + subject + ")?|approved|" + subject + " (?:is )?approved)"
+        let approval = "(?:(?:i )?approve(?: (?:" + subject + "|it))?|approved|" + subject + " (?:is )?approved)"
         let production = "(?:[,;.!] ?| and )(?:please )?(?:make (?:the movie|the film)|start (?:rendering|production)|render the film)"
-        return text.range(of:"^(?:yes[, ]+)?(?:please )?" + approval + "(?:" + production + ")?[.!]*$",options:.regularExpression) != nil
+        return text.range(of:"^(?:jarvis[, ]+)?(?:yes[, ]+)?(?:please )?" + approval + "(?:" + production + ")?[.!]*$",options:.regularExpression) != nil
     }
 
     static func digest(_ text: String) -> String { SHA256.hash(data:Data(text.utf8)).map { String(format:"%02x",$0) }.joined() }
@@ -43,6 +44,10 @@ struct FilmStory: Codable {
         guard let line = script.components(separatedBy:.newlines).first(where:{$0.hasPrefix("RUNTIME_SECONDS:")}),
               let seconds = Int(line.dropFirst("RUNTIME_SECONDS:".count).trimmingCharacters(in:.whitespaces)),seconds >= 15,seconds <= 600 else { return nil }
         return seconds
+    }
+    func canRender(task assignmentID: String) -> Bool {
+        phase == "rendering" && taskID == assignmentID && !approvedAt.isEmpty &&
+        !approvedHash.isEmpty && approvedHash == hash && hash == Self.digest(script) && runtime != nil
     }
     func canApprove(_ submitted: String) -> Bool {
         phase == "awaiting_approval" && runtime != nil && !script.isEmpty && hash == Self.digest(script) && submitted == hash && viewedHash == hash

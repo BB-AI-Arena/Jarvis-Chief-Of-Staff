@@ -23,13 +23,14 @@ time.sleep(1.5)
 print(json.dumps({'type':'done','path':'/tmp/test-film.mp4'}),flush=True)
 """.write(to:script,atomically:true,encoding:.utf8)
 var worker: Process?, kinds = [String](), live = false, complete = false, exitCode: Int32 = -1
+LocalFilmWorker.canStart = { false }
 var denied = false
 let blocked = LocalFilmWorker.start(spec:[:],folder:root.appendingPathComponent("blocked"),project:project,script:script,event:{ _ in },completion:{ denied = $0 != 0 })
 assert(blocked == nil && denied)
 assert(!FileManager.default.fileExists(atPath:root.appendingPathComponent("blocked").path))
 // Only this synthetic script is authorized; it prints fixtures and has no provider calls.
 LocalFilmWorker.canStart = { true }
-defer { LocalFilmWorker.canStart = { SpendBudget.allowsUnboundedJobs } }
+defer { LocalFilmWorker.canStart = { SpendBudget.allowsBudgetedFilm } }
 worker = LocalFilmWorker.start(spec:["brief":"A bridge check with no credentials"],folder:root.appendingPathComponent("job"),project:project,script:script,event:{ event in
     kinds.append(event["type"] as? String ?? "")
     if event["type"] as? String == "progress" { live = worker?.isRunning == true }

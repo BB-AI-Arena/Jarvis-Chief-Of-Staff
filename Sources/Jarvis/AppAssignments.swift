@@ -18,7 +18,7 @@ extension JarvisApp {
         switch director {
         case "technology": return (claudeConnected, seatRuns[director] != nil)
         case "research": return (grokConnected || claudeConnected, seatRuns[director] != nil)
-        case "creative": return (cursorConnected || grokConnected || comfyWorkflow() != nil, seatRuns[director] != nil)
+        case "creative": return (cursorConnected || grokConnected || claudeConnected || comfyWorkflow() != nil, seatRuns[director] != nil)
         case "projects": return (projectsModel != nil, seatRuns[director] != nil)
         case "operations": return (AgentRuntime.executable != nil, tasks["work"] != nil)
         default: return (false, false)
@@ -288,7 +288,12 @@ extension JarvisApp {
     }
     /// Creative work runs as a Cursor cloud agent on the configured repository. The ledger keeps the agent link.
     func startCreative(_ parent: TaskRecord) {
-        if parent.title.hasPrefix("[Story consultation]"),startStoryWriter(parent) { return }
+        if parent.title.hasPrefix("[Story consultation]") {
+            if startStoryWriter(parent) { return }
+            if (try? String(contentsOf:support.appendingPathComponent("story-writer-provider.txt"),encoding:.utf8))?.trimmingCharacters(in:.whitespacesAndNewlines) == "anthropic" {
+                updateTask(parent.id,state:"failed",summary:"The configured Anthropic screenplay writer is unavailable. No alternate provider was launched.");return
+            }
+        }
         if !parent.title.hasPrefix("[Story consultation]"), VideoPlan.isVideoRequest(parent.instructions) { startVideo(parent); return }
         guard let apiKey = CursorCredential.read() else { return }
         let repo = cursorRepo, model = cursorModel, task = DirectorBrief.make(role:"creative",instructions:parent.instructions) + "\n\n" + DirectorResultsContext(workspace:workspace,records:ledger.load()).context(for:parent.instructions)

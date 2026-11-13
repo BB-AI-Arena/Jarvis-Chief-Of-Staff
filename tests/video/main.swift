@@ -178,3 +178,12 @@ assert(!VideoPlan.isVideoRequest("Write the film screenplay for review"))
 assert(!VideoPlan.isVideoRequest("Generate Brandon's script for the Drop Assassin video"))
 assert(VideoPlan.isVideoRequest("Render the film from the approved screenplay"))
 print("PASS: script-writing requests cannot become video rendering merely because their context mentions a film")
+
+var cloudDenied = false
+GrokVideo(apiKey:"not-a-credential").render(VideoPlan.Shot(prompt:"Must stay local",seconds:5),to:URL(fileURLWithPath:"/tmp/never-created-cloud-video.mp4"),isCancelled:{false}) { file,error in
+    cloudDenied = file == nil && error?.contains("disabled") == true
+}
+let cloudDeadline = Date().addingTimeInterval(1)
+while !cloudDenied && Date() < cloudDeadline { RunLoop.current.run(until:Date().addingTimeInterval(0.01)) }
+assert(cloudDenied,"Cloud video generation must be denied without a network call")
+print("PASS: legacy cloud video renderer refuses new work; DARK-only policy has no cloud fallback")

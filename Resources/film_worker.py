@@ -83,6 +83,15 @@ def safe_error(error):
 
 def http(url, body=None, headers=None, timeout=120, binary=False):
     check_stop()
+    if urllib.parse.urlparse(url).hostname in ('api.anthropic.com', 'api.x.ai'):
+        broker = os.environ.get('JARVIS_FILM_BUDGET_BROKER')
+        if not broker or not os.path.isfile(broker) or not os.access(broker, os.X_OK):
+            raise RuntimeError('Film spending broker is unavailable; no provider request sent. Checkpoint retained.')
+        result = subprocess.run([broker, '--film-provider-request'], input=json.dumps({'url': url, 'body': body}).encode(),
+                                capture_output=True, timeout=timeout+30)
+        if result.returncode:
+            raise RuntimeError('Film provider request was blocked or failed within the shared daily Creative allowance; checkpoint retained.')
+        return result.stdout if binary else json.loads(result.stdout)
     request = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), headers=headers or {})
     if body is not None:
         request.add_header('Content-Type', 'application/json')
@@ -376,8 +385,7 @@ class Film:
             **({'thinking': {'type': 'between_tools'}} if model.startswith('claude-sonnet-5-5') else {}),
             'system': base+'\nReturn exactly one valid JSON object. No markdown, commentary, analysis or prose outside that object.',
             'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': prompt}] + list(blocks)}]},
-            {'x-api-key': read_key('claude'), 'anthropic-version': '2023-06-01',
-             'anthropic-beta': 'server-side-fallback-2026-07-01'}, timeout=240)
+            timeout=240)
         self.usage('creative', model, body)
         raw = '\n'.join(v.get('text', '') for v in body.get('content', []) if v.get('type') == 'text')
         safe = raw
@@ -759,10 +767,10 @@ class Film:
         body = http('https://api.x.ai/v1/images/edits', {'model': 'grok-imagine-image-2.0', 'prompt': prompt +
             '\nUse the labelled reference roles for exact visible subject identity and materials. A collectible toy remains a physical toy, not an extra human character. Fix the scene composition and anatomy for a physical film frame. The last image is the failed local attempt, not a style to imitate. No poster montage. No new text.',
             'images': images, 'n': 1, 'aspect_ratio': '16:9', 'resolution': '2k', 'quality': 'medium', 'response_format': 'b64_json'},
-            {'Authorization': 'Bearer ' + read_key('grok')}, timeout=240)
+            timeout=240)
         first = body['data'][0]
         data = base64.b64decode(first['b64_json']) if first.get('b64_json') else http(first['url'], timeout=60, binary=True)
-        self.state.setdefault('grok_repairs', []).append({'shot': index+1, 'model': 'grok-imagine-image-2.0', 'estimated_max_usd': 0.12})
+        self.state.setdefault('grok_repairs', []).append({'shot': index+1, 'model': 'grok-imagine-image-2.0', 'estimated_max_usd': round(0.08 + 0.01 * len(images), 2)})
         self.save()
         return data
 

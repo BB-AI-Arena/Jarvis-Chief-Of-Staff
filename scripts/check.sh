@@ -72,3 +72,10 @@ swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sour
 
 swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/StoryReview.swift tests/story_review/main.swift -o .build/check-story-review
 .build/check-story-review
+
+swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/FilmProviderBroker.swift tests/film_broker/main.swift -o .build/check-film-broker
+.build/check-film-broker
+swiftc Sources/Jarvis/TaskLedger.swift Sources/Jarvis/FilmStory.swift Sources/Jarvis/StoryReview.swift Sources/Jarvis/FilmStoryWorkflow.swift tests/film_workflow/main.swift -o .build/check-film-workflow
+.build/check-film-workflow
+
+python3 -B tests/check_film_budget.py
