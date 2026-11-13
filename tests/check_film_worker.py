@@ -8,6 +8,15 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).parents[1]
+# The real PNG validation uses the film runtime's Pillow dependency.
+# Keep the normal check command usable when the system Python lacks Pillow.
+if importlib.util.find_spec('PIL') is None:
+    import os
+    import sys
+    runtime = ROOT / '.voice/bin/python'
+    if not runtime.exists() or Path(sys.prefix).resolve() == runtime.parent.parent.resolve():
+        raise RuntimeError('Run scripts/bootstrap.sh to install the film runtime before these tests')
+    os.execv(str(runtime), [str(runtime), '-B', str(Path(__file__).resolve())])
 spec = importlib.util.spec_from_file_location('film_worker', ROOT / 'Resources/film_worker.py')
 w = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(w)
@@ -70,6 +79,46 @@ class FilmTests(unittest.TestCase):
             for invalid in ({'shots':[card,dict(long,seconds=5)]}, {'shots':[card,long]}):
                 with patch.object(f,'claude',return_value=invalid),self.assertRaises(ValueError):
                     f.bound_shot_durations(part,10)
+
+    def test_typeset_opening_is_bound_to_approved_text_hash_and_timing(self):
+        import hashlib
+        from PIL import Image
+        script='First approved title sentence.\nSecond approved title sentence.'
+        sha=hashlib.sha256(script.encode()).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
+            spec=self.spec();spec['brief']='APPROVED SHA256: '+sha+'\n\n'+script;f=w.Film(spec,tmp)
+            folder=Path(tmp)/'typeset';folder.mkdir();image=folder/'opening-card.png';Image.new('RGB',(64,32)).save(image)
+            info={'approved_sha256':sha,'seconds':4,'lines':script.splitlines(),'sha256':hashlib.sha256(image.read_bytes()).hexdigest(),'dimensions':[64,32]}
+            (folder/'opening-card.json').write_text(json.dumps(info))
+            self.assertIsNotNone(f.typeset_opening({'seconds':4},0));self.assertIsNone(f.typeset_opening({'seconds':4},1))
+            with self.assertRaisesRegex(ValueError,'timing'):f.typeset_opening({'seconds':5},0)
+            for lines in (['',''],['First approved title sentence.']*2,[None,None],script):
+                invalid=dict(info,lines=lines);(folder/'opening-card.json').write_text(json.dumps(invalid))
+                with self.subTest(lines=lines),self.assertRaises(ValueError):f.typeset_opening({'seconds':4},0)
+            (folder/'opening-card.json').write_text(json.dumps(dict(info,dimensions=[32,64])))
+            with self.assertRaises(ValueError):f.typeset_opening({'seconds':4},0)
+            (folder/'opening-card.json').write_text(json.dumps(info))
+            image.write_bytes(b'changed pixels')
+            with self.assertRaisesRegex(ValueError,'content changed'):f.typeset_opening({'seconds':4},0)
+
+    def test_typeset_export_verifies_frames_dimensions_and_reuses_only_intact_clip(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
+            spec=self.spec();spec['dark']={'user':'fixture','host':'invalid','key':'unused'};f=w.Film(spec,tmp)
+            f.state['scenes']['0']={'output':{'filename':'card.png','type':'output'}}
+            shot={'seconds':4};plate=({'dimensions':[64,32]},Path(tmp)/'card.png')
+            def response(frames=96,width=64):
+                return SimpleNamespace(stdout=json.dumps({'streams':[{'codec_type':'video','nb_read_frames':str(frames),'width':width,'height':32}]}).encode())
+            for bad in (response(frames=95),response(width=32)):
+                with patch.object(w.subprocess,'run',return_value=bad),patch.object(f,'view') as download:
+                    with self.assertRaisesRegex(ValueError,'export verification'):f.typeset_clip(shot,0,plate)
+                    download.assert_not_called()
+                self.assertNotIn('0',f.state['clips'])
+            with patch.object(w.subprocess,'run',return_value=response()) as render,patch.object(f,'view',return_value=b'verified-video-fixture'):
+                first=f.typeset_clip(shot,0,plate)
+                self.assertEqual(f.typeset_clip(shot,0,plate),first);self.assertEqual(render.call_count,1)
+                (Path(tmp)/'shot-001.mp4').write_bytes(b'tampered')
+                f.typeset_clip(shot,0,plate);self.assertEqual(render.call_count,2)
 
     def test_failed_shot_does_not_block_independent_clips(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):

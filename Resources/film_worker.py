@@ -915,8 +915,57 @@ class Film:
         output,prompt_id=self.comfy(graph,'scene',index,timeout=1200)
         return self.view(output),output,prompt_id,seed
 
+    def typeset_opening(self, shot, index):
+        metadata=self.root/'typeset/opening-card.json'
+        if index != 0 or not metadata.exists():return None
+        info=json.loads(metadata.read_text());image=self.root/'typeset/opening-card.png'
+        match=re.search(r'APPROVED SHA256: ([0-9a-f]{64})\n\n',self.spec['brief'])
+        if not match or info.get('approved_sha256') != match.group(1) or info.get('seconds') != shot['seconds']:
+            raise ValueError('Typeset opening does not match the approved screenplay/timing')
+        lines=info.get('lines')
+        if not isinstance(lines,list) or len(lines)!=2 or any(not isinstance(line,str) or not line.strip() for line in lines) or len(set(lines))!=2:
+            raise ValueError('Incomplete typeset opening')
+        if hashlib.sha256(image.read_bytes()).hexdigest()!=info.get('sha256') or not all(line in self.spec['brief'][match.end():] for line in lines):
+            raise ValueError('Typeset opening content changed; checkpoint retained')
+        from PIL import Image
+        with Image.open(image) as source:
+            if source.format!='PNG' or list(source.size)!=info.get('dimensions'):
+                raise ValueError('Typeset opening PNG dimensions mismatch')
+            source.verify()
+        return info,image
+
+    def typeset_scene(self, shot, index, plate):
+        info,image=plate;subfolder='jarvis-films/'+self.client
+        output={'filename':'typeset-opening.png','subfolder':subfolder,'type':'output'}
+        remote=self.remote_media(output)
+        subprocess.run(self.dark_args('mkdir -p '+shlex.quote(str(Path(remote).parent))+' && cat > '+shlex.quote(remote)),input=image.read_bytes(),capture_output=True,check=True,timeout=60)
+        local=self.root/('scene-%03d.png'%(index+1));local.write_bytes(image.read_bytes())
+        record={'signature':digest([shot,info,'typeset-v1']),'output':output,'image':self.image_path(output),'source':'DARK deterministic approved typography','reference_indices':[],
+                'review':{'pass':True,'method':'Exact approved text typeset with real font; source image hash verified'},'sha256':info['sha256']}
+        self.state['scenes'][str(index)]=record;self.save();return record
+
+    def typeset_clip(self, shot, index, plate):
+        info,image=plate;signature=digest([shot,info,'typeset-video-v1']);file=self.root/('shot-%03d.mp4'%(index+1))
+        old=self.state['clips'].get(str(index))
+        if old and old.get('signature')==signature and file.exists() and hashlib.sha256(file.read_bytes()).hexdigest()==old.get('sha256'):return old
+        scene=self.state['scenes'][str(index)];output={'filename':'typeset-opening.mp4','subfolder':'jarvis-films/'+self.client,'type':'output'}
+        target=self.remote_media(output);source=self.remote_media(scene['output']);seconds=shot['seconds']
+        self.progress('Compositing exact approved opening type on DARK / NVIDIA NVENC','video',index)
+        command=('ffmpeg -v error -y -loop 1 -framerate 24 -i '+shlex.quote(source)+' -t '+str(seconds)+
+            ' -vf fade=t=in:st=0:d=0.5 -c:v h264_nvenc -preset p6 -cq 18 -pix_fmt yuv420p -an '+shlex.quote(target)+
+            ' && ffprobe -v error -count_frames -show_streams -show_format -of json '+shlex.quote(target))
+        probe=json.loads(subprocess.run(self.dark_args(command),capture_output=True,check=True,timeout=180).stdout)
+        video=next(v for v in probe['streams'] if v['codec_type']=='video')
+        if int(video['nb_read_frames'])!=seconds*24 or [video['width'],video['height']]!=info['dimensions']:
+            raise ValueError('Typeset opening export verification failed')
+        file.write_bytes(self.view(output));record={'signature':signature,'output':output,'prompt_id':None,'source':'DARK deterministic typography / NVIDIA NVENC',
+            'review':{'pass':True,'method':'Approved source typography image verified; deterministic fade and exact frame count'},'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'typeset_plate':info,'repairs':0,'review_samples':0}
+        self.state['clips'][str(index)]=record;self.save();emit('clip',index=index,path=str(file),seconds=seconds);return record
+
     def scene(self, plan, index):
         shot = plan['shots'][index]
+        plate=self.typeset_opening(shot,index)
+        if plate:return self.typeset_scene(shot,index,plate)
         indices = self.scene_inputs(shot)
         refs = [self.refs[i]['image'] for i in indices]
         labels = ['Image %s is reference %s (%s): %s' % (j+1, i, Path(self.refs[i]['source']).name, self.refs[i].get('role', 'artwork identity/prop reference')) for j, i in enumerate(indices)]
@@ -1164,6 +1213,8 @@ class Film:
 
     def clip(self, plan, index):
         shot = plan['shots'][index]
+        plate=self.typeset_opening(shot,index)
+        if plate:return self.typeset_clip(shot,index,plate)
         scene = self.state['scenes'][str(index)]
         file = self.root / ('shot-%03d.mp4' % (index+1))
         motion = ('The input image is the exact starting scene. Maintain only its visible cast and props. '

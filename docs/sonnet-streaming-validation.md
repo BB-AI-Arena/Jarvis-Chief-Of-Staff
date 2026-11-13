@@ -31,3 +31,9 @@ All 54 worker tests passed, including protagonist reference creation and resume 
 Screen/prop inserts accept a descriptive non-empty explanation instead of requiring one exact phrase. Blank, short, non-text reasons and unsupported coverage still fail validation. For locked screenplay batches, a bounded production-editor request can subdivide overlong render units; the returned batch must retain its total duration and every shot must remain within the renderer's one-to-five-second limit. Variable shot counts allow a short title card without forcing another unit over the limit. Story-preservation instructions remain attached; duration validation is not semantic creative acceptance.
 
 All 55 worker tests passed, including invalid explanations, unsupported coverage, retained short-card timing, idempotent valid batches, changed-total rejection and rejection of still-overlong repair results.
+
+## Deterministic approved opening card
+
+A job-scoped opening plate can replace generated lettering with a real-font PNG, bound to the approved screenplay hash, two nonblank distinct approved text lines, image hash and shot timing. Valid PNG dimensions must match metadata. The worker uploads that plate to DARK and uses NVIDIA NVENC for the fade clip, checking encoded dimensions and exact frame count. Cached clips are reused only when their signatures and file hashes match.
+
+All 57 worker tests passed, including malformed text metadata, changed source pixels, dimension mismatches, incorrect export frame counts/dimensions and tampered cache regeneration. The test command uses the existing film Python runtime if the system Python lacks Pillow. These technical checks do not replace visual inspection of the actual encoded opening or creative acceptance of the completed film.
