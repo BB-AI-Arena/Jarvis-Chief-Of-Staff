@@ -28,17 +28,18 @@ extension JarvisApp {
                 guard let data = try? JSONSerialization.data(withJSONObject:plan),let raw = String(data:data,encoding:.utf8) else { return nil }
                 return VideoPlan.parse(raw,renderer:.comfy,total:total)
             }
+            let animatic = registration["kind"] as? String == "animatic"
             externalFilms[id] = folder
             let delivery = filmJSON(folder.appendingPathComponent("delivery-status.json")) ?? [:]
             let upload = filmJSON(folder.appendingPathComponent("social-upload-status.json")) ?? [:]
             let status = supervisor["status"] as? String ?? "unknown"
             let heartbeat = supervisor["heartbeat"] as? Double ?? 0
             let stale = Date().timeIntervalSince1970 - heartbeat > 90
-            let complete = delivery["stage"] as? String == "Completed — video ready"
+            let complete = delivery["stage"] as? String == (animatic ? "Completed — animatic ready" : "Completed — video ready")
             let failed = ["needs_attention","cancelled"].contains(status) || (stale && status != "completed") || delivery["stage"] as? String == "Needs attention"
             var job = videoJobs[id] ?? VideoPlan.Progress(taskID:id)
-            if let parsed { job.loadDirected(parsed,total:parsed.seconds) }
-            job.renderer = "4090 · FLUX.2 → LTX-2.3"
+            if animatic { job.shots = [] } else if let parsed { job.loadDirected(parsed,total:parsed.seconds) }
+            job.renderer = animatic ? "DARK · storyboard animatic" : "4090 · FLUX.2 → LTX-2.3"
             let clips = state["clips"] as? [String:Any] ?? [:]
             let scenes = state["scenes"] as? [String:Any] ?? [:]
             for i in job.shots.indices {
@@ -46,16 +47,20 @@ extension JarvisApp {
                 job.shots[i].pipelinePhase = scenes[String(i)] == nil ? "scene" : "scene_ready"
             }
             job.note = stale && !complete && status != "completed" ? "Supervisor heartbeat missing; checkpoints retained" : (supervisor["reason"] as? String ?? state["status"] as? String ?? "Working")
-            job.note = "\(clips.count)/\(job.shots.count) clips accepted · " + job.note
-            job.stage = failed ? .failed : complete ? .finished : status == "completed" ? .joining : .rendering
+            if animatic {
+                let boards = state["boards"] as? [String:Any] ?? [:]
+                let totalBoards = max(boards.count,state["boards_total"] as? Int ?? 0)
+                job.note = "\(boards.count)/\(totalBoards) storyboard boards ready · " + job.note
+            } else { job.note = "\(clips.count)/\(job.shots.count) clips accepted · " + job.note }
+            job.stage = failed ? .failed : complete ? .finished : status == "completed" ? .joining : animatic ? .planning : .rendering
             job.ended = failed || complete ? Date() : nil
-            if complete { job.note = upload["stage"] as? String ?? "Completed — video ready" }
+            if complete { job.note = animatic ? "Animatic ready — full film not rendered" : (upload["stage"] as? String ?? "Completed — video ready") }
             videoJobs[id] = job;publishVideo(id)
             let taskState = status == "cancelled" ? "cancelled" : failed ? "failed" : complete ? "completed" : "running"
             if let i = records.firstIndex(where:{$0.id == id}) {
                 records[i].state = taskState;records[i].resultSummary = job.note;records[i].updatedAt = TaskLedger.timestamp()
             } else {
-                records.insert(TaskRecord(id:id,state:taskState,verified:false,owner:"creative",createdAt:TaskLedger.timestamp(),updatedAt:TaskLedger.timestamp(),resultSummary:job.note,title:parsed?.title ?? "Approved film recovery"),at:0)
+                records.insert(TaskRecord(id:id,state:taskState,verified:false,owner:"creative",createdAt:TaskLedger.timestamp(),updatedAt:TaskLedger.timestamp(),resultSummary:job.note,title:animatic ? "Approved screenplay animatic" : (parsed?.title ?? "Approved film recovery")),at:0)
             }
         }
         if !externalFilms.isEmpty { publishTasks(records) }
