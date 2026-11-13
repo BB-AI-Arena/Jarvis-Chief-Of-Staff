@@ -42,7 +42,7 @@ swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sour
 .build/check-film-bridge
 swiftc Tools/jarvis-keys/main.swift -o .build/check-jarvis-keys
 zsh tests/keys/check.sh .build/check-jarvis-keys
-swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sources/Jarvis/TokenMeter.swift Sources/Jarvis/JarvisRouter.swift Sources/Jarvis/RouteDecision.swift tests/router/main.swift -o .build/check-router
+swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sources/Jarvis/TokenMeter.swift Sources/Jarvis/ClaudeStream.swift Sources/Jarvis/JarvisRouter.swift Sources/Jarvis/RouteDecision.swift tests/router/main.swift -o .build/check-router
 .build/check-router
 swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sources/Jarvis/BoardMemory.swift tests/memory/main.swift -o .build/check-memory
 .build/check-memory
@@ -50,7 +50,7 @@ swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sour
 .build/check-workspace
 swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/WorkspaceTools.swift Sources/Jarvis/SharedWorkspaceContext.swift tests/workspace_context/main.swift -o .build/check-workspace-context
 .build/check-workspace-context
-swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sources/Jarvis/TokenMeter.swift Sources/Jarvis/Acceptance.swift Sources/Jarvis/JarvisRouter.swift Sources/Jarvis/RouteDecision.swift tests/acceptance/main.swift -o .build/check-acceptance
+swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sources/Jarvis/TokenMeter.swift Sources/Jarvis/Acceptance.swift Sources/Jarvis/ClaudeStream.swift Sources/Jarvis/JarvisRouter.swift Sources/Jarvis/RouteDecision.swift tests/acceptance/main.swift -o .build/check-acceptance
 .build/check-acceptance
 swiftc Sources/Jarvis/SpendBudget.swift Sources/Jarvis/PromptDelivery.swift Sources/Jarvis/TokenMeter.swift Sources/Jarvis/HealthCheck.swift Sources/Jarvis/DarkServer.swift Sources/Jarvis/VideoPlan.swift Sources/Jarvis/VideoArtwork.swift Sources/Jarvis/VideoRender.swift Sources/Jarvis/ClaudeClient.swift Sources/Jarvis/GrokClient.swift Sources/Jarvis/OllamaClient.swift Sources/Jarvis/CursorClient.swift Sources/Jarvis/RouteDecision.swift Sources/Jarvis/AgentRuntime.swift Sources/Jarvis/ConversationBrain.swift Sources/Jarvis/Personas.swift Sources/Jarvis/KeychainBroker.swift Sources/Jarvis/VoiceCredential.swift Sources/Jarvis/ClaudeCredential.swift Sources/Jarvis/GrokCredential.swift Sources/Jarvis/CursorCredential.swift tests/health/main.swift -o .build/check-health
 .build/check-health

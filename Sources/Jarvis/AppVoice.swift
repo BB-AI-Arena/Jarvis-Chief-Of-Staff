@@ -112,6 +112,10 @@ extension JarvisApp {
                         if event["ready"] as? Bool == true { self.voiceReady = true }
                         if let path = event["path"] as? String {
                             guard event["id"] as? String == self.activeSpeechID else { continue }
+                            if self.streamPlayback {
+                                self.streamSyntheses = max(0,self.streamSyntheses-1);self.streamAudio.append(event)
+                                self.playStreamNext()
+                            } else {
                             do {
                                 let player = try AVAudioPlayer(contentsOf: URL(fileURLWithPath: path))
                                 player.delegate = self; player.isMeteringEnabled = true; self.audio = player
@@ -129,6 +133,7 @@ extension JarvisApp {
                                 self.send("notice", "Jarvis could not play its reply. Check your audio output.")
                                 self.endConversation(cancelReply: false)
                             }
+                            }
                         }
                         if event["error"] != nil, self.conversationActive { self.endConversation(cancelReply: false) }
                         self.send("voice", event)
@@ -138,6 +143,36 @@ extension JarvisApp {
         }
         voiceReady = false
         do { try process.run(); voiceProcess = process } catch { send("voice", ["error": "Local Kokoro is not ready yet."]) }
+    }
+    func queueStreamSentence(_ text:String) {
+        guard let voice = streamVoice else { return }
+        streamText += text;streamSpoke = true;streamPlayback = true;streamSyntheses += 1
+        if voiceProcess?.isRunning != true { startVoice() }
+        let data = try? JSONSerialization.data(withJSONObject:["id":activeSpeechID,"text":text,"voice":voice])
+        if let data { voiceInput?.fileHandleForWriting.write(data + Data([10])) }
+    }
+    func playStreamNext() {
+        guard audio?.isPlaying != true else { return }
+        guard !streamAudio.isEmpty else { finishStreamIfIdle();return }
+        let event = streamAudio.removeFirst()
+        do {
+            let player = try AVAudioPlayer(contentsOf:URL(fileURLWithPath:event["path"] as! String));audio = player;player.delegate = self
+            send("mouthCues",event["mouthCues"] as? [[String:Any]] ?? []);send("state","speaking")
+            guard player.play() else { throw NSError(domain:"Voice",code:1) }
+            player.isMeteringEnabled = true;outputMeter?.invalidate()
+            outputMeter = Timer.scheduledTimer(withTimeInterval:0.04,repeats:true) { [weak self, weak player] _ in
+                guard let self,let player,player.isPlaying else { return }
+                self.send("audioTime",player.currentTime);player.updateMeters()
+                self.send("audioLevel",min(1,pow(10,Double(player.averagePower(forChannel:0))/20)*5))
+            }
+        } catch { streamAudio = [];streamSyntheses = 0;streamPending = false;resumeConversation() }
+    }
+    func clearStreamPlayback() {
+        audio?.stop();outputMeter?.invalidate();activeSpeechID = UUID().uuidString
+        streamVoice = nil;streamPlayback = false;streamSpoke = false;streamPending = false;streamSyntheses = 0;streamAudio = [];streamText = ""
+    }
+    func finishStreamIfIdle() {
+        if !streamPending && streamSyntheses == 0 && streamAudio.isEmpty && audio?.isPlaying != true { streamVoice = nil;streamPlayback = false;resumeConversation() }
     }
     func speak(_ text: String, voice: String, conversational: Bool = false) {
         if conversational && !conversationActive { return }
@@ -152,8 +187,10 @@ extension JarvisApp {
     }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         guard player === audio else { return }
+        if let url = player.url { try? FileManager.default.removeItem(at:url) }
         outputMeter?.invalidate(); outputMeter = nil; send("audioLevel", 0); send("mouthCues", [])
-        if flag { resumeConversation() }
+        if flag, streamPlayback || streamSyntheses > 0 || !streamAudio.isEmpty { playStreamNext() }
+        else if flag { resumeConversation() }
         else { send("notice", "Audio playback was interrupted."); endConversation(cancelReply: false) }
     }
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
@@ -170,6 +207,7 @@ extension JarvisApp {
         }
     }
     func endConversation(cancelReply: Bool) {
+        streamVoice = nil;streamPlayback = false;streamPending = false;streamSpoke = false;streamAudio = [];streamSyntheses = 0
         conversationActive = false; conversationID = UUID(); activeSpeechID = UUID().uuidString
         let live = liveVoice; liveVoice = nil; live?.stop()
         stopRecording(); audio?.stop(); audio = nil; outputMeter?.invalidate(); outputMeter = nil; send("audioLevel", 0); send("mouthCues", [])

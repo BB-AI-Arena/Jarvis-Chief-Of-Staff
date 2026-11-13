@@ -41,8 +41,12 @@ extension JarvisApp {
             }
         }
         guard claudeConnected,let apiKey = ClaudeCredential.read() else { luna();return }
-        JarvisRouter.route(prompt,history:history,apiKey:apiKey,persona:Personas.text("jarvis") ?? "",memory:context) { decision in
-            if let decision { deliver(decision) } else { luna() }
+        let streamID = self.streamVoice != nil ? self.activeSpeechID : nil
+        JarvisRouter.route(prompt,history:history,apiKey:apiKey,persona:Personas.text("jarvis") ?? "",memory:context, sentence:self.streamVoice == nil ? nil : { [weak self] text in guard let self, streamID == self.activeSpeechID else { return };self.queueStreamSentence(text) }) { decision in
+            if let streamID, streamID != self.activeSpeechID { return }
+            self.streamPending = false
+            if self.streamSpoke { self.finishStreamIfIdle() }
+            if let decision { deliver(decision) } else { self.clearStreamPlayback();luna() }
         }
     }
     /// Carries out a routing decision. What Jarvis says goes back through the voice delegation, or as a typed reply.

@@ -208,7 +208,14 @@ function sendMessage() {
   $('prompt').value = '';
   saveMessages();
   setBusy(true);
-  native({ action: 'chat', prompt, history, model: $('brainSelect').value });
+  native({
+    action: 'chat',
+    prompt,
+    history,
+    model: $('brainSelect').value,
+    spoken: spoken || conversationActive,
+    voice: voices.Jarvis,
+  });
   notice(
     'Connecting to ' +
       ($('brainSelect').value === 'claude'
@@ -982,7 +989,7 @@ window.receive = ({ event, data }) => {
       break;
     case 'announce':
       notice(data.text);
-      if (spoken || conversationActive)
+      if ((spoken || conversationActive) && !data.streamed)
         native({
           action: 'speak',
           text: data.text,
@@ -1159,7 +1166,7 @@ window.receive = ({ event, data }) => {
       $('connection').innerHTML =
         '<b style="background:#65e7d1"></b>' + escape(data.model) + ' · connected';
       notice('Reply received. Conversation saved locally.');
-      if (spoken || conversationActive)
+      if ((spoken || conversationActive) && !data.streamed)
         native({
           action: 'speak',
           text: data.text,
@@ -1640,7 +1647,7 @@ function updateBrain() {
   const m = $('brainSelect').value;
   $('modelCaption').textContent =
     m === 'claude'
-      ? 'Claude conversation · British local voice'
+      ? 'Sonnet conversation · British local voice'
       : m === 'luna'
         ? 'Luna conversation · Astra reasoning'
         : m === 'astra'

@@ -378,3 +378,9 @@ migratedClaude.w.receive({event:'models', data:{models:['gemma4:latest']}});
 assert.equal(migratedClaude.w.document.getElementById('brainSelect').value,'claude');
 migratedClaude.w.close();
 console.log('PASS: existing conversation preferences migrate to Claude and local British Lewis without Gemma override');
+
+const streamedReply = workspace('workspace');
+streamedReply.w.receive({event:'reply',data:{text:'Certainly, Brandon.',model:'Claude Sonnet',streamed:true}});
+assert.equal(streamedReply.calls.filter(c=>c.action==='speak').length,0);
+streamedReply.w.close();
+console.log('PASS: final streamed reply is saved without duplicate full-response speech');

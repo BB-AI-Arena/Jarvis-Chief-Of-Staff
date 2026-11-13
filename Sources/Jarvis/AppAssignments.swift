@@ -6,7 +6,7 @@ import Speech
 extension JarvisApp {
     // MARK: Task core. Every request is recorded first, queued per director, and started when that seat is free.
     func acknowledge(_ message: String, _ liveUpdate: ((String) -> Void)?) {
-        if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis"]); send("state", "idle") }
+        if let update = liveUpdate { update(message) } else { send("reply", ["text": message, "model": "Jarvis", "streamed":streamSpoke && message == streamText]); if !streamPlayback { streamVoice = nil };streamSpoke = false; send("state", "idle") }
     }
     /// Tells Brandon something through whatever is live: the voice delegation that asked, the live voice session, or page speech.
     func say(_ line: String, for parentID: String? = nil) {

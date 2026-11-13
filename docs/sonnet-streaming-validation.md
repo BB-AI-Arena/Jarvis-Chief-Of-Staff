@@ -1,0 +1,15 @@
+# Sonnet sentence streaming validation
+
+This follow-up uses Claude Sonnet for conversation and streams complete reply sentences into the local British Kokoro voice queue. It retains the full final text and avoids speaking the same completed reply twice. It does not reintroduce the earlier fixed 50-character speech fragments.
+
+The SSE parser accepts one named route tool with matching block indexes. Incomplete, failed, unknown-tool and multiple-tool responses cannot become completed routing decisions. Provider requests reserve the existing daily Jarvis allowance before transport; successful usage settles the hold, while ambiguous failures retain it.
+
+Independent checks passed: UI regression/format checks; no-network URLSession SSE transport with escaped text, exact final speech, invalid block/tool handling and budget settlement; and six real British sentence WAVs retained while waiting for playback. Playback now owns completed-file cleanup and updates mouth/audio timing. Stream failures clear queued speech so the connection error can be spoken.
+
+A separate live native Sonnet smoke request yielded its first complete sentence after approximately 1.86 seconds and returned matching final text. This is one observation, not a latency guarantee or proof of audible installed streaming.
+
+## Release state
+
+The signed build was installed only after production exhausted its bounded retries and no native tasks remained active. The retained screenplay approval and production recovery state were preserved. Source publication to `main` follows independent installed-build verification; this release does not claim that film production completed successfully.
+
+The source manifest contains 100 application inputs. The independent audit uses `tests/check_installed_build.py --ref origin/main --manifest docs/followup-source-manifest.json` against `/Applications/Jarvis.app`, including strict signatures, source digests, complete bundle comparison, resource membership, executable comparison and unsupported broker destination refusal.

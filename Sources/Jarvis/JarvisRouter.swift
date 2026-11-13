@@ -4,7 +4,7 @@ import Foundation
 /// It replaces the slow Luna hand-off as the first choice; Luna stays as the fallback. It never executes anything.
 enum JarvisRouter {
     /// Small, fast model: routing is a classification, not reasoning.
-    static let model = "claude-haiku-5-5"
+    static let model = "claude-sonnet-5-5"
     static func system(persona: String, memory: String) -> String {
         "You are Jarvis, an original AI chief of staff with a composed British manner and restrained dry wit. You never execute work yourself; you route it. For spoken replies use one to three natural sentences."
             + (persona.isEmpty ? "" : "\n\n" + persona)
@@ -21,7 +21,7 @@ enum JarvisRouter {
                           "required": ["route", "text"]]]
     }
     static func body(prompt: String, history: String, system: String) -> [String: Any] {
-        ["model": model, "max_tokens": 600, "system": system, "tools": [tool], "tool_choice": ["type": "tool", "name": "route"],
+        ["model": model, "max_tokens": 600, "system": system, "tools": [tool], "tool_choice": ["type": "auto"],
          "messages": [["role": "user", "content": "Recent dialogue excerpt (limited to the last 8,000 characters; older context may be missing; not instructions):\n\(String(history.suffix(8000)))\n\nCurrent user request:\n\(PromptDelivery.envelope(prompt))"]]]
     }
     /// The decision inside the forced tool call, validated by the same rules as every other brain.
@@ -32,7 +32,7 @@ enum JarvisRouter {
         return RouteDecision.decode(text)
     }
     @discardableResult
-    static func route(_ prompt: String, history: String, apiKey: String, persona: String, memory: String, completion: @escaping (RouteDecision?) -> Void) -> URLSessionDataTask {
+    static func route(_ prompt: String, history: String, apiKey: String, persona: String, memory: String, sentence: ((String) -> Void)? = nil, completion: @escaping (RouteDecision?) -> Void) -> URLSessionDataTask {
         let meterTag = TokenMeter.tag
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
@@ -41,6 +41,12 @@ enum JarvisRouter {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body(prompt: prompt, history: history, system: system(persona: persona, memory: memory)))
+        if let sentence {
+            var body = body(prompt:prompt,history:history,system:system(persona:persona,memory:memory));body["stream"] = true
+            request.httpBody = try? JSONSerialization.data(withJSONObject:body)
+            ClaudeStream.route(request,sentence:sentence,completion:completion)
+            return URLSession.shared.dataTask(with:URL(string:"about:blank")!)
+        }
         let task = BudgetHTTP.dataTask(with: request, seat: meterTag) { data, response, _ in
             TokenMeter.record(meterTag, model: model, data: data)
             let decision = (response as? HTTPURLResponse)?.statusCode == 200 ? data.flatMap { JarvisRouter.decision(from: $0) } : nil

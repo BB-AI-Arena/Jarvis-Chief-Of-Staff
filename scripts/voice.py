@@ -39,8 +39,6 @@ def main():
                 samples, rate, timings = kokoro.create_timed(text, voice=voice, speed=0.94 if voice == 'bm_lewis' else 1.0, lang='en-gb' if voice.startswith('b') else 'en-us')
                 path = output_dir / f'{time.monotonic_ns()}.wav'
                 sf.write(path, samples, rate)
-                for old in sorted(output_dir.glob('*.wav'))[:-4]:
-                    old.unlink(missing_ok=True)
                 emit(id=job.get('id', ''), path=str(path), voice=voice, mouthCues=cues(timings), seconds=round(time.monotonic()-start, 2), duration=round(len(samples)/rate, 2))
             except Exception as exc:
                 emit(id=job.get('id', ''), error=str(exc))

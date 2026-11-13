@@ -43,6 +43,13 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     let brain = ConversationBrain()
     var liveVoice: CloudVoice?
     var startupScheduled = false
+    var streamText = ""
+    var streamVoice: String?
+    var streamPlayback = false
+    var streamPending = false
+    var streamSpoke = false
+    var streamAudio: [[String:Any]] = []
+    var streamSyntheses = 0
     var outputMeter: Timer?
     var support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis")
     lazy var ledger = TaskStore(directory: support.appendingPathComponent("tasks"))
@@ -248,6 +255,10 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             if let live = liveVoice { live.sendText(prompt); return }
             if conversationActive { stopRecording() }
             let model = body["model"] as? String ?? "astra"
+            if model == "claude", (body["spoken"] as? Bool == true || conversationActive) {
+                streamText = "";streamVoice = body["voice"] as? String ?? "bm_lewis";streamPending = true;streamSpoke = false;streamAudio = [];streamSyntheses = 0
+                activeSpeechID = UUID().uuidString;stopRecording()
+            }
             if ["astra","luna","claude"].contains(model) { chat(prompt, history: body["history"] as? String ?? "", deep: model == "astra", claudeOnly:model == "claude") }
             else { localChat(prompt, history: body["history"] as? String ?? "", model: model) }
         }
