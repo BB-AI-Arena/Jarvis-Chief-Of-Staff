@@ -48,7 +48,7 @@ New director requests use a conservative **$10 USD daily allowance per director*
 | 🫧 **A floating companion** | Collapse the workspace into a draggable desktop orb and return when you need the full view. |
 | 🇬🇧 **A distinctive personality** | Composed British delivery, discreet assistance and restrained dry wit. |
 | 🔊 **Local speech** | Kokoro voices, including **bm_lewis**, plus selectable voices and previews for team roles. |
-| 🧠 **Your choice of intelligence** | Luna conversation routing, Astra for deeper reasoning and selectable Ollama models for local conversation. |
+| 🧠 **Your choice of intelligence** | Claude conversation with local British speech, Luna routing, Astra for deeper reasoning and selectable Ollama models for local conversation. |
 | 🕸️ **Files you can explore** | Folder maps and Graphify code relationships with search, pan, zoom and Reveal in Finder. |
 
 > **“Jarvis, help me think this through.”**<br>
@@ -64,7 +64,7 @@ The board gives each specialist a seat, a persona and a clear responsibility. Co
 
 | Seat | Responsibility | Current implementation |
 | :--- | :--- | :--- |
-| **Jarvis · Chief of Staff** | Conversation, clarification and delegation | Voice frontend with Luna/Astra routing and local conversation options. |
+| **Jarvis · Chief of Staff** | Conversation, clarification and delegation | Voice frontend with selectable Claude conversation, Luna/Astra routing and local conversation options. |
 | **Chief Technology Officer** | Engineering judgment and technical coordination | Anthropic/Claude adapter, configurable model, native tool-call handling and bounded tool rounds. Requires a verified API connection. |
 | **Director of Research** | Research and alternative perspectives | Live web research through xAI/Grok, with Claude web search as the assignment fallback when Grok is disconnected and Claude is connected. Requires a verified provider connection. |
 | **Creative Director** | Design direction, naming, copy and repository work | Cursor Cloud Agents for repository work, plus a shot-planning and video-rendering pipeline with retained DARK/ComfyUI support. New production is gated, and motion rendering must use local models on DARK. Each backend requires its own configuration and access. |
@@ -167,8 +167,8 @@ open dist/Jarvis.app
 
 ### Make it yours
 
-1. Open **Settings**, connect OpenAI realtime voice through the native secure key field and select realtime conversation audio.
-2. Start a conversation and choose your conversation brain. Use Ollama for a local conversation path or Luna/Astra through the configured runtime.
+1. Open **Settings** and choose your conversation brain. Claude conversation uses the configured Anthropic connection and local British `bm_lewis` speech; it reports connection failures without silently switching to another conversation model.
+2. Start a conversation. Ollama provides a local conversation path, while Luna/Astra use the configured runtime. OpenAI realtime audio is a separate optional voice backend requiring its own API connection.
 3. Open the board to configure the specialist providers you want to use. Select a model installed on the configured Ollama server for **Projects** and configure **Operations** only after its runtime and budget enforcement have been verified. Provider seats require their connection checks.
 4. Connect at least two speaking directors—CTO, Research or Projects—then ask Jarvis to put a question to the board.
 5. Select a local folder to explore its structure and available Graphify relationships.

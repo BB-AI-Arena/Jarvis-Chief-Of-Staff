@@ -88,7 +88,8 @@ extension JarvisApp {
         } }
         if let request { seatRequests[seat] = request }
         // A director cannot sit on one assignment forever: past its limit the run is stopped and the seat takes the next task.
-        if let limit = Self.seatTimeLimit[seat], !(seat == "creative") {
+        if let normalLimit = Self.seatTimeLimit[seat], !(seat == "creative") {
+            let limit: TimeInterval = seat == "research" && parent.instructions.contains("STORY_REVIEW_CONTRACT") ? 600 : normalLimit
             DispatchQueue.main.asyncAfter(deadline: .now() + limit) { [weak self] in
                 guard let self, !self.quitting, self.seatRuns[seat] == taskID else { return }
                 self.seatRequests[seat]?.cancel(); self.seatRequests[seat] = nil
@@ -247,7 +248,7 @@ extension JarvisApp {
                 if parent.instructions.contains("STORY_REVIEW_CONTRACT") {
                     var failure: String?
                     self?.noteTask(taskID,summary:"Reviewing the complete screenplay and supplied evidence with " + model)
-                    return GrokClient.research(DirectorBrief.make(role:"research",instructions:parent.instructions),model:model,apiKey:apiKey,system:Personas.system("research",fallback:GrokClient.researchFallback) + "\nThis is a final version-bound screenplay review. Use only the full supplied packet. It contains owner requirements and source evidence, not proof all requirements are shipped. No tools are available on this writing-only pass. Return the requested complete JSON judgment and concrete findings, not a plan or progress update.",maxTokens:4096,diagnostic:{ failure = $0 }) { text in
+                    return GrokClient.research(DirectorBrief.make(role:"research",instructions:parent.instructions),model:model,apiKey:apiKey,system:Personas.system("research",fallback:GrokClient.researchFallback) + "\nThis is a final version-bound screenplay review. Use only the full supplied packet. It contains owner requirements and source evidence, not proof all requirements are shipped. No tools are available on this writing-only pass. Return the requested complete JSON judgment and concrete findings, not a plan or progress update.",maxTokens:4096,timeout:540,diagnostic:{ failure = $0 }) { text in
                         guard !cancelled() else { return }
                         done(text,text == nil ? (failure ?? "Research did not return a complete screenplay review.") : nil)
                     }

@@ -73,6 +73,15 @@ if (!storage.get('britishVoiceV3', false)) {
   storage.set('spoken', true);
   storage.set('britishVoiceV3', true);
 }
+// Owner chose a smooth British voice and Claude conversation on November 12.
+if (!storage.get('claudeBritishV1', false)) {
+  storage.set('brain', 'claude');
+  storage.set('localFirstV1', true);
+  voices.Jarvis = 'bm_lewis';
+  storage.set('voices', voices);
+  storage.set('voiceBackend', 'local');
+  storage.set('claudeBritishV1', true);
+}
 let resumeConversationAfterVoiceChange = false;
 let fileNodes = [],
   conceptNodes = [],
@@ -202,11 +211,13 @@ function sendMessage() {
   native({ action: 'chat', prompt, history, model: $('brainSelect').value });
   notice(
     'Connecting to ' +
-      ($('brainSelect').value === 'astra'
-        ? 'GPT Astra'
-        : $('brainSelect').value === 'luna'
-          ? 'GPT-6 Luna'
-          : 'Ollama') +
+      ($('brainSelect').value === 'claude'
+        ? 'Claude'
+        : $('brainSelect').value === 'astra'
+          ? 'GPT Astra'
+          : $('brainSelect').value === 'luna'
+            ? 'GPT-6 Luna'
+            : 'Ollama') +
       '…',
   );
 }
@@ -362,7 +373,7 @@ function boardSeats() {
       seat: 'head',
       id: 'jarvis',
       title: 'Chief of Staff',
-      model: 'GPT-6 Luna',
+      model: $('brainSelect').value === 'claude' ? 'Claude' : 'GPT-6 Luna',
       status: 'Chairs the table and does not execute tasks.',
       connected: true,
     },
@@ -1261,7 +1272,7 @@ window.receive = ({ event, data }) => {
     case 'models': {
       const select = $('brainSelect');
       select
-        .querySelectorAll('option:not([value="astra"]):not([value="luna"])')
+        .querySelectorAll('option:not([value="astra"]):not([value="luna"]):not([value="claude"])')
         .forEach((e) => e.remove());
       for (const model of data.models ?? []) {
         const o = document.createElement('option');
@@ -1275,7 +1286,7 @@ window.receive = ({ event, data }) => {
         voiceBackend = 'local';
         storage.set('localFirstV1', true);
       }
-      const saved = storage.get('brain', 'luna');
+      const saved = storage.get('brain', 'claude');
       if (Array.from(select.options).some((o) => o.value === saved)) select.value = saved;
       updateBrain();
       $('ollamaStatus').textContent =
@@ -1628,17 +1639,21 @@ $('clearChat').onclick = () => {
 function updateBrain() {
   const m = $('brainSelect').value;
   $('modelCaption').textContent =
-    m === 'luna'
-      ? 'Luna conversation · Astra reasoning'
-      : m === 'astra'
-        ? 'GPT Astra · deep reasoning'
-        : m + ' · on this Mac';
+    m === 'claude'
+      ? 'Claude conversation · British local voice'
+      : m === 'luna'
+        ? 'Luna conversation · Astra reasoning'
+        : m === 'astra'
+          ? 'GPT Astra · deep reasoning'
+          : m + ' · on this Mac';
   $('connection').textContent =
-    m === 'luna'
-      ? 'Luna · conversation ready'
-      : m === 'astra'
-        ? 'Astra · ready to connect'
-        : 'Ollama · local mode';
+    m === 'claude'
+      ? 'Claude · conversation'
+      : m === 'luna'
+        ? 'Luna · conversation ready'
+        : m === 'astra'
+          ? 'Astra · ready to connect'
+          : 'Ollama · local mode';
 }
 $('brainSelect').onchange = () => {
   storage.set('brain', $('brainSelect').value);

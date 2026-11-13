@@ -10,17 +10,17 @@ extension JarvisApp {
         return RouteDecision(route:"approve_story",text:"",director:nil,task:story.hash)
     }
     /// Typed requests. With Astra selected in Settings the request goes straight to deep reasoning; otherwise it is routed.
-    func chat(_ prompt: String, history: String, deep: Bool = false) {
+    func chat(_ prompt: String, history: String, deep: Bool = false, claudeOnly: Bool = false) {
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         send("state", "thinking")
         if let approval = explicitStoryApproval(prompt) { act(on:approval,prompt:prompt,history:history,liveUpdate:nil);return }
         if deep { deepReason(prompt, history: history, liveUpdate: nil); return }
-        routeRequest(prompt, history: history) { [weak self] decision in
+        routeRequest(prompt, history: history, claudeOnly:claudeOnly) { [weak self] decision in
             self?.act(on: decision, prompt: prompt, history: history, liveUpdate: nil)
         }
     }
     /// Routing: the fast Claude router first, Luna second. Nil only when neither answered.
-    func routeRequest(_ prompt: String, history: String, evidence: String = "", lookupRemaining: Int = 4, completion: @escaping (RouteDecision?) -> Void) {
+    func routeRequest(_ prompt: String, history: String, evidence: String = "", lookupRemaining: Int = 4, claudeOnly: Bool = false, completion: @escaping (RouteDecision?) -> Void) {
         if let approval = explicitStoryApproval(prompt) { completion(approval);return }
         let boardEvidence = SharedWorkspaceContext.needsEvidence(prompt) ? DirectorResultsContext(workspace:workspace,records:ledger.load()).context(for:prompt) + "\n\n" + SharedWorkspaceContext(root:workspace,support:support).context(for:prompt,history:history) : ""
         let context = memory.context() + "\n\n" + boardEvidence + "\n\n" + evidence
@@ -29,9 +29,10 @@ extension JarvisApp {
             guard decision?.route == "lookup" else { completion(decision);return }
             guard lookupRemaining > 0 else { completion(RouteDecision(route:"reply",text:"I reached this turn's workspace lookup limit. I have not reviewed any remaining parts; please narrow the result or question.",director:nil));return }
             let found = SharedWorkspaceContext(root:self.workspace,support:self.support).lookup(decision?.task ?? "")
-            self.routeRequest(prompt,history:history,evidence:evidence + "\n\n" + found,lookupRemaining:lookupRemaining-1,completion:completion)
+            self.routeRequest(prompt,history:history,evidence:evidence + "\n\n" + found,lookupRemaining:lookupRemaining-1,claudeOnly:claudeOnly,completion:completion)
         }
         let luna = { [weak self] in
+            if claudeOnly { deliver(RouteDecision(route:"reply",text:"Claude is not answering just now. I have not switched to another conversation model or started new work.",director:nil));return }
             guard let self, !self.brain.busy, AgentRuntime.executable != nil else { deliver(nil);return }
             self.send("notice","Luna is routing this request…")
             self.brain.ask(prompt,history:history,context:context,deep:false) { [weak self] text,route,director,error in

@@ -110,11 +110,25 @@ extension JarvisApp {
                     if let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
                         if let id = event["id"] as? String, !id.isEmpty, id != self.activeSpeechID { continue }
                         if event["ready"] as? Bool == true { self.voiceReady = true }
-                        if event["path"] is String {
+                        if let path = event["path"] as? String {
                             guard event["id"] as? String == self.activeSpeechID else { continue }
-                            self.speechChunks.append(event)
-                            self.speechGenerationFinished = event["final"] as? Bool ?? true
-                            self.playNextSpeechChunk()
+                            do {
+                                let player = try AVAudioPlayer(contentsOf: URL(fileURLWithPath: path))
+                                player.delegate = self; player.isMeteringEnabled = true; self.audio = player
+                                self.send("mouthCues", event["mouthCues"] as? [[String: Any]] ?? [])
+                                guard player.play() else { throw NSError(domain: "JarvisVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "Audio playback could not start."]) }
+                                self.send("state", "speaking")
+                                self.outputMeter?.invalidate()
+                                self.outputMeter = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self, weak player] _ in
+                                    guard let self = self, let player = player, player.isPlaying else { return }
+                                    self.send("audioTime", player.currentTime)
+                                    player.updateMeters()
+                                    self.send("audioLevel", min(1,pow(10,Double(player.averagePower(forChannel: 0))/20)*5))
+                                }
+                            } catch {
+                                self.send("notice", "Jarvis could not play its reply. Check your audio output.")
+                                self.endConversation(cancelReply: false)
+                            }
                         }
                         if event["error"] != nil, self.conversationActive { self.endConversation(cancelReply: false) }
                         self.send("voice", event)
@@ -131,42 +145,15 @@ extension JarvisApp {
         if voiceProcess?.isRunning != true { startVoice() }
         guard voiceProcess?.isRunning == true else { endConversation(cancelReply: false); return }
         activeSpeechID = UUID().uuidString
-        audio = nil; speechChunks = []; speechGenerationFinished = false
         speechIsConversation = conversationActive
         let data = try? JSONSerialization.data(withJSONObject: ["id": activeSpeechID, "text": String(text.prefix(2500)), "voice": voice])
         if let data = data { voiceInput?.fileHandleForWriting.write(data + Data([10])) }
         send("state", "synthesizing"); send("notice", "Jarvis is preparing its spoken reply…")
     }
-    func playNextSpeechChunk() {
-        guard audio?.isPlaying != true else { return }
-        // A new request or interruption invalidates any queued audio from the old request.
-        speechChunks.removeAll { $0["id"] as? String != activeSpeechID }
-        guard !speechChunks.isEmpty else {
-            if speechGenerationFinished { resumeConversation() }
-            else { send("state","synthesizing") }
-            return
-        }
-        let event = speechChunks.removeFirst()
-        guard let path = event["path"] as? String else { return }
-        do {
-            let player = try AVAudioPlayer(contentsOf:URL(fileURLWithPath:path))
-            try? FileManager.default.removeItem(atPath:path)
-            player.delegate = self;player.isMeteringEnabled = true;audio = player
-            send("mouthCues",event["mouthCues"] as? [[String:Any]] ?? [])
-            guard player.play() else { throw NSError(domain:"JarvisVoice",code:1) }
-            send("state","speaking");outputMeter?.invalidate()
-            outputMeter = Timer.scheduledTimer(withTimeInterval:0.04,repeats:true) { [weak self,weak player] _ in
-                guard let self,let player,player.isPlaying else { return }
-                self.send("audioTime",player.currentTime);player.updateMeters()
-                self.send("audioLevel",min(1,pow(10,Double(player.averagePower(forChannel:0))/20)*5))
-            }
-        } catch { send("notice","Jarvis could not play its reply. Check your audio output.");endConversation(cancelReply:false) }
-    }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         guard player === audio else { return }
         outputMeter?.invalidate(); outputMeter = nil; send("audioLevel", 0); send("mouthCues", [])
-        audio = nil
-        if flag { playNextSpeechChunk() }
+        if flag { resumeConversation() }
         else { send("notice", "Audio playback was interrupted."); endConversation(cancelReply: false) }
     }
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
@@ -183,7 +170,6 @@ extension JarvisApp {
         }
     }
     func endConversation(cancelReply: Bool) {
-        speechChunks = [];speechGenerationFinished = false
         conversationActive = false; conversationID = UUID(); activeSpeechID = UUID().uuidString
         let live = liveVoice; liveVoice = nil; live?.stop()
         stopRecording(); audio?.stop(); audio = nil; outputMeter?.invalidate(); outputMeter = nil; send("audioLevel", 0); send("mouthCues", [])

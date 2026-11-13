@@ -49,3 +49,50 @@ print("PASS: Research receives complete long screenplays on both request paths")
 
 assert(GrokClient.text(from:Data("{\"choices\":[{\"finish_reason\":\"length\",\"message\":{\"content\":\"unfinished\"}}]}".utf8)) == nil)
 assert(GrokClient.searchText(from:Data("{\"status\":\"incomplete\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"unfinished\"}]}]}".utf8)) == nil)
+
+// Exercise the real transport without credentials, network access or a nine-minute wait.
+final class ReviewTimeoutProtocol: URLProtocol {
+    static var timeouts: [TimeInterval] = []
+    static var shouldTimeout = false
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "api.x.ai" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.timeouts.append(request.timeoutInterval)
+        if Self.shouldTimeout { client?.urlProtocol(self, didFailWithError: URLError(.timedOut)); return }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"Complete review\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3}}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+let budgetRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+SpendBudget.directory = budgetRoot
+URLProtocol.registerClass(ReviewTimeoutProtocol.self)
+defer { URLProtocol.unregisterClass(ReviewTimeoutProtocol.self); try? FileManager.default.removeItem(at: budgetRoot) }
+func checkReviewTimeout(_ seconds: TimeInterval?, fails: Bool = false) {
+    ReviewTimeoutProtocol.shouldTimeout = fails
+    var complete = false, result: String?, diagnostic: String?
+    let done: (String?) -> Void = { result = $0; complete = true }
+    let task: URLSessionDataTask
+    if let seconds {
+        task = GrokClient.research(fullReview, model: "grok-4.7", apiKey: "fixture-not-a-key", maxTokens: 4096, timeout: seconds, diagnostic: { diagnostic = $0 }, completion: done)
+    } else {
+        task = GrokClient.research(fullReview, model: "grok-4.7", apiKey: "fixture-not-a-key", maxTokens: 4096, diagnostic: { diagnostic = $0 }, completion: done)
+    }
+    let request = task.originalRequest!
+    assert(request.timeoutInterval == (seconds ?? 180))
+    let payload = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+    assert(payload["max_tokens"] as? Int == 4096)
+    assert((payload["messages"] as! [[String: String]])[1]["content"] == fullReview)
+    let deadline = Date().addingTimeInterval(5)
+    while !complete && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+    assert(complete)
+    if fails { assert(result == nil && diagnostic?.contains("Grok request failed") == true) }
+    else { assert(result == "Complete review" && diagnostic == nil) }
+}
+checkReviewTimeout(nil)
+checkReviewTimeout(540)
+checkReviewTimeout(540, fails: true)
+assert(ReviewTimeoutProtocol.timeouts == [180, 540, 540])
+print("PASS: ordinary requests retain 180s, full screenplay requests use 540s without truncation, and timeout cannot return a completed review")

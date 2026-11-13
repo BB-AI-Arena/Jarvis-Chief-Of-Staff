@@ -34,8 +34,6 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
     var conversationActive = false
     var conversationID = UUID()
     var recognitionID = UUID()
-    var speechChunks: [[String:Any]] = []
-    var speechGenerationFinished = false
     var activeSpeechID = UUID().uuidString
     var speechIsConversation = false
     var turn = VoiceTurn()
@@ -250,7 +248,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScri
             if let live = liveVoice { live.sendText(prompt); return }
             if conversationActive { stopRecording() }
             let model = body["model"] as? String ?? "astra"
-            if model == "astra" || model == "luna" { chat(prompt, history: body["history"] as? String ?? "", deep: model == "astra") }
+            if ["astra","luna","claude"].contains(model) { chat(prompt, history: body["history"] as? String ?? "", deep: model == "astra", claudeOnly:model == "claude") }
             else { localChat(prompt, history: body["history"] as? String ?? "", model: model) }
         }
         case "models": localModels()

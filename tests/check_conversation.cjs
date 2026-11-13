@@ -35,6 +35,7 @@ assert.equal(calls.filter(c => c.action === 'chat').length, 0);
 w.receive({ event: 'voiceTurn', data: 'Help me plan an app' });
 assert.equal(calls.filter(c => c.action === 'chat').length, 1);
 assert.equal(calls.find(c => c.action === 'chat').prompt, 'Help me plan an app');
+assert.equal(calls.find(c => c.action === 'chat').model, 'claude');
 console.log('PASS: silence-completed voice turn sends automatically, without Enter or Send');
 w.receive({ event: 'reply', data: { text: 'Certainly. What will the app help people do?', model: 'GPT Astra' } });
 const speech = calls.filter(c => c.action === 'speak');
@@ -368,3 +369,12 @@ assert.equal(changedVoice.calls.at(-1).voice,'bm_george');
 console.log('PASS: changing Jarvis’s voice restarts the active session on the selected local voice');
 
 changedVoice.w.close();
+
+const migratedClaude = workspace('workspace', {brain:'gemma4:latest', voiceBackend:'live', voices:{Jarvis:'af_heart'}});
+assert.equal(migratedClaude.w.document.getElementById('brainSelect').value,'claude');
+assert.equal(JSON.parse(migratedClaude.w.localStorage.getItem('jarvis.voiceBackend')),'local');
+assert.equal(JSON.parse(migratedClaude.w.localStorage.getItem('jarvis.voices')).Jarvis,'bm_lewis');
+migratedClaude.w.receive({event:'models', data:{models:['gemma4:latest']}});
+assert.equal(migratedClaude.w.document.getElementById('brainSelect').value,'claude');
+migratedClaude.w.close();
+console.log('PASS: existing conversation preferences migrate to Claude and local British Lewis without Gemma override');

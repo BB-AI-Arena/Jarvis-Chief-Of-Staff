@@ -136,11 +136,11 @@ enum GrokClient {
         send(body, remaining: maxToolRounds, first: true)
     }
     @discardableResult
-    static func research(_ prompt: String, model: String, apiKey: String, system: String = GrokClient.researchFallback, maxTokens: Int = 1200, diagnostic: ((String) -> Void)? = nil, completion: @escaping (String?) -> Void) -> URLSessionDataTask {
+    static func research(_ prompt: String, model: String, apiKey: String, system: String = GrokClient.researchFallback, maxTokens: Int = 1200, timeout: TimeInterval = 180, diagnostic: ((String) -> Void)? = nil, completion: @escaping (String?) -> Void) -> URLSessionDataTask {
         let meterTag = TokenMeter.tag
         var request = URLRequest(url: URL(string: "https://api.x.ai/v1/chat/completions")!)
         request.httpMethod = "POST"
-        request.timeoutInterval = 180
+        request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         authorize(&request, apiKey)
         var body = requestBody(prompt, model: model, system: system)
