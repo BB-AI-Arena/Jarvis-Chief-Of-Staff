@@ -43,3 +43,5 @@ Writing requests omit the tools field when no tools are available. Response-limi
 At a terminal screenplay checkpoint, `--director-writing-request creative /absolute/brief.txt` queues a separate real writing-only consultation task. The command also accepts `research` for a later independent critique of the complete saved spine. These tasks do not modify the screenplay workflow, approval, hash or script, and do not auto-start another screenplay or render. The request archive records the actual task ID. Research is submitted manually only after Creative's full saved result is available; workshop agreement is not screenplay approval.
 
 The dispatch regression verifies that the saved screenplay bytes remain unchanged and a repeated inbox scan cannot duplicate the workshop task.
+
+Scoped Research writing tasks use the configured Grok model's no-tools review path (4,096 output tokens, 540-second request and 600-second assignment watchdog). They preserve the format requested by the brief, without silently using web research or switching to the fast model. Provider failures keep the original reservations and return the review path's explicit diagnostic.
