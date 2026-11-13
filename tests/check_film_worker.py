@@ -18,6 +18,33 @@ screen=importlib.util.module_from_spec(screen_spec);screen_spec.loader.exec_modu
 
 
 class FilmTests(unittest.TestCase):
+    def test_locked_screenplay_hash_and_prior_outline_isolation(self):
+        import hashlib
+        script='RUNTIME_SECONDS: 90\nAlex waits for the alert.\nEND'
+        spec=self.spec();spec['brief']='Approved film\nAPPROVED SHA256: '+hashlib.sha256(script.encode()).hexdigest()+'\n\n'+script
+        with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
+            f=w.Film(spec,tmp);f.state['project_outline']='Old unrelated awakening story'
+            self.assertEqual(f.project_outline(),'')
+            self.assertIn(script,f.approved_rules)
+            spec['brief']+='Changed'
+            with self.assertRaisesRegex(ValueError,'hash mismatch'):w.Film(spec,tmp)
+
+    def test_reference_free_insert_never_invents_a_character_reference(self):
+        shot=self.plan()['shots'][0];shot['reference_indices']=[]
+        with self.assertRaisesRegex(ValueError,'artwork selection'):w.validate_shots({'shots':[shot]},shot['seconds'],1)
+        shot.update(coverage_type='screen_insert',reference_free_reason='No artwork-defined identity is visible')
+        self.assertEqual(w.validate_shots({'shots':[shot]},shot['seconds'],1),[shot])
+        shot['reference_indices']=[7]
+        with self.assertRaisesRegex(ValueError,'artwork selection'):w.validate_shots({'shots':[shot]},shot['seconds'],1)
+
+    def test_local_visual_only_blocks_cloud_still_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
+            spec=self.spec();spec['local_render_only']=True;f=w.Film(spec,tmp)
+            with patch.object(w,'http') as request:
+                with self.assertRaisesRegex(ValueError,'cloud still rendering is disabled'):
+                    f.grok_scene('prompt',[],b'',0)
+                request.assert_not_called()
+
     def test_failed_shot_does_not_block_independent_clips(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(w.Film,'preview_ref',return_value=[]):
             f=w.Film(self.spec(),tmp);plan=self.plan();plan['shots']*=3;finished=[];calls={}

@@ -13,3 +13,9 @@ A separate live native Sonnet smoke request yielded its first complete sentence 
 The signed build was installed only after production exhausted its bounded retries and no native tasks remained active. The retained screenplay approval and production recovery state were preserved. Source publication to `main` follows independent installed-build verification; this release does not claim that film production completed successfully.
 
 The source manifest contains 100 application inputs. The independent audit uses `tests/check_installed_build.py --ref origin/main --manifest docs/followup-source-manifest.json` against `/Applications/Jarvis.app`, including strict signatures, source digests, complete bundle comparison, resource membership, executable comparison and unsupported broker destination refusal.
+
+## Approved-script artwork repair
+
+The subsequent worker repair permits explicitly identified screen/prop inserts without unrelated artwork references. It verifies the supplied approved screenplay hash, adds that complete script and production constraints to director requests, and bypasses prior local outlines for a locked screenplay. Films configured `local_render_only` refuse the cloud still-image fallback. These checks bind the planning input; creative review is still needed to establish scene fidelity.
+
+Independent regression checks passed: all 53 film-worker tests, film-budget tests and supervisor tests. The signed package was installed at an idle point before publication. The existing screenplay approval and spend records were preserved. This release does not claim a completed or accepted film.

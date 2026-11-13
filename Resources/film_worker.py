@@ -121,6 +121,26 @@ def image_block(data, label):
         'type': 'base64', 'media_type': 'image/jpeg', 'data': base64.b64encode(out.getvalue()).decode()}}]
 
 
+def approved_story_rules(spec):
+    script = spec.get('approved_screenplay')
+    expected = spec.get('approved_screenplay_sha256')
+    if script is None:
+        match = re.search(r'APPROVED SHA256: ([0-9a-f]{64})\n\n', spec.get('brief', ''))
+        if not match: return ''
+        expected, script = match.group(1), spec['brief'][match.end():]
+
+    actual = hashlib.sha256(script.encode()).hexdigest()
+    if actual != expected:
+        raise ValueError('Approved screenplay hash mismatch; production refused')
+    return ('OWNER-APPROVED SCREENPLAY IS LOCKED. This is production coverage, not another writing pass. '
+            'Follow the complete approved screenplay below, its character bible, scene order, timed events, exact dialogue and UI copy. '
+            'Do not introduce characters, magical events, awakenings, costumes, locations, purchases or dialogue from a previous film or an unrelated reference. '
+            'Artwork is a visual reference only; it cannot add a subject or story event. No narrator unless explicitly approved. '
+            'Only local DARK RTX 4090 models render images/video; never call a cloud video generator. '
+            'Do not omit required events or change the story to fit convenient shots. Return a production plan of this screenplay. '
+            '\nCOMPLETE LOCKED SCREENPLAY SHA256: '+actual+'\n'+script+'\nEND LOCKED SCREENPLAY.\n')
+
+
 def validate_shots(plan, total, reference_count, expected_count=None):
     shots = plan.get('shots', [])
     if not shots or (expected_count is not None and len(shots) != expected_count):
@@ -131,7 +151,8 @@ def validate_shots(plan, total, reference_count, expected_count=None):
         refs = shot.get('reference_indices', [])
         if not isinstance(shot.get('seconds'), int) or not 1 <= shot['seconds'] <= 5:
             raise ValueError('Unsupported shot duration')
-        minimum=0 if shot.get('environment_only') is True else 1
+        insert = shot.get('coverage_type') in ('screen_insert', 'prop_insert') and shot.get('reference_free_reason') == 'No artwork-defined identity is visible'
+        minimum=0 if shot.get('environment_only') is True or insert else 1
         if not minimum <= len(refs) <= 3 or len(set(refs)) != len(refs) or not all(isinstance(n, int) and 0 <= n < reference_count for n in refs):
             raise ValueError('Invalid artwork selection for shot %s' % (i+1))
         for field in ['image_prompt', 'prompt', 'purpose']:
@@ -327,6 +348,7 @@ def recoverable_visual_error(error):
 
 class Film:
     def __init__(self, spec, root):
+        self.approved_rules = approved_story_rules(spec)
         self.spec, self.root = spec, Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.server = spec['server'].rstrip('/')
@@ -379,6 +401,7 @@ class Film:
             raise ValueError('Film planning/review token limit reached; checkpoint retained')
         model = self.spec.get('model', 'claude-sonnet-5-5')
         base=system or (self.spec['director_system']+'\nLocal engine exception: an occasional environment_only:true establishing/POV shot may use reference_index:null and reference_indices:[] when no artwork-defined subject is visible. Character/merchandise shots still require their actual artwork references. Environment coverage cannot replace an essential user-requested character event and needs real environmental progression, not only a digital zoom.')
+        base += '\n' + self.approved_rules
         body = http('https://api.anthropic.com/v1/messages', {
             'model': model, 'max_tokens': maximum,
             # Sonnet 5.5 defaults to adaptive thinking; bounded JSON tasks must reserve output for the schema.
@@ -441,6 +464,7 @@ class Film:
         return http(self.server + '/view?' + urllib.parse.urlencode(output), timeout=30, binary=True)
 
     def project_outline(self):
+        if self.approved_rules: return ''  # Earlier local outlines cannot rewrite a locked screenplay.
         if 'project_outline' in self.state:
             return self.state['project_outline']
         self.progress('Projects is drafting the story structure locally')
@@ -606,7 +630,7 @@ class Film:
                     'Already directed preceding beats (avoid repeating them):\n' + json.dumps([{'purpose': s['purpose'], 'narration': s.get('narration', '')} for s in shots[-12:]]) +
                     '\nDirect ONLY the next %s seconds, from %s to %s, of this continuous %s-second film. Return exactly %s shots, normally five seconds each, durations adding to %s. '
                     'The story must ADVANCE through the assigned act and end at the appropriate point, not finish the whole film early. Each shot needs purpose (the narrative information or emotional change, not exact finger positions or camera blocking), seconds, reference_index, reference_indices (one to three valid global reference indices for visible artwork-defined subjects), '
-                    'An occasional character-free establishing/POV cut may use environment_only:true, reference_index:null and reference_indices:[] when no artwork-defined subject is visible. Such a cut needs actual environmental action (for example traffic or a door), not a frozen scene with only a digital zoom, and cannot replace an essential user-requested character event. '
+                    'A phone/UI or prop insert without any visible artwork-defined identity may instead use coverage_type:screen_insert or prop_insert, reference_free_reason:No artwork-defined identity is visible, reference_index:null and reference_indices:[]. A hand-only screen insert is allowed; a recognizable cast member or collectible must use its actual reference. Never attach an unrelated logo/character just to fill the list. An occasional character-free establishing/POV cut may use environment_only:true, reference_index:null and reference_indices:[] when no artwork-defined subject is visible. Such a cut needs actual environmental action (for example traffic or a door), not a frozen scene with only a digital zoom, and cannot replace an essential user-requested character event. '
                     'image_prompt (a detailed NEW physical opening scene, repeating the identity details of ONLY visible characters/props), frame_identity (compact identity details for ONLY the subjects visibly present in this shot; omit all offscreen cast and objects), prompt (detailed smooth action and camera motion during the shot), narration (zero to nine natural spoken words; use a complete sentence when possible; do not narrate every cut), '
                     'sound_cue (none, phone, reveal, tension or resolve), and location (stable short name). '
                     'frame_identity contains stable appearance only, not camera angle, starting pose or a permanent no-face rule. Put starting views in image_prompt; a turn may reveal another view of the same identity during motion. '
@@ -749,6 +773,8 @@ class Film:
         return '/'.join(filter(None, [result.get('subfolder', ''), result['name']]))
 
     def grok_scene(self, prompt, indices, failed_data, index, anchor=None):
+        if self.spec.get('local_render_only'):
+            raise ValueError('Local visual repair required; cloud still rendering is disabled for this film')
         if self.state['grok_stills'] >= self.spec.get('max_grok_stills', 10):
             raise ValueError('Grok still repair cap reached; checkpoint retained for review')
         self.progress('Scene %s failed local review; consulting Grok for a reference still' % (index+1), 'scene', index)
