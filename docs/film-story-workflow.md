@@ -45,3 +45,11 @@ At a terminal screenplay checkpoint, `--director-writing-request creative /absol
 The dispatch regression verifies that the saved screenplay bytes remain unchanged and a repeated inbox scan cannot duplicate the workshop task.
 
 Scoped Research writing tasks use the configured Grok model's no-tools review path (4,096 output tokens, 540-second request and 600-second assignment watchdog). They preserve the format requested by the brief, without silently using web research or switching to the fast model. Provider failures keep the original reservations and return the review path's explicit diagnostic.
+
+## Present a separately reviewed complete assembly
+
+At an idle terminal checkpoint, `--adopt-reviewed-story /absolute/script.md research-task-id creative-task-id` queues an exact-version validation. Both actual saved parent tasks must be completed, belong to their respective seats, and contain the complete same script and SHA-256 in their original instructions. The full Research result must parse as an acceptance of that hash with no changes. The Creative result body must consist of the standalone acceptance marker and the exact screenplay hash, with no contradictory text. Runtime must be valid.
+
+Successful validation archives the previous workflow, adoption request and full director results, preserves owner direction/history, and presents the complete assembled script as awaiting approval. Viewed and approval fields are cleared; adoption does not open the result on behalf of the owner, queue a production task or dispatch rendering. The owner must open and explicitly approve that exact version through the existing gate. Failed evidence validation leaves the screenplay unchanged.
+
+Regression coverage includes changed content, stale reviews, running calls, mismatched or contradictory confirmation, retained history, unread owner gate and no render dispatch.

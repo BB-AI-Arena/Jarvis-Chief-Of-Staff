@@ -136,3 +136,47 @@ assert(workshopTask.owner == "creative" && workshopTask.instructions.contains("n
 let afterWorkshopCount = app.dispatched.count
 app.consumeStoryRevisionRequests();assert(app.dispatched.count == afterWorkshopCount)
 print("PASS: separate writing workshop dispatches once without modifying screenplay state or approval")
+
+// Only actual completed, full-version director records may become an owner-review proposal.
+var oldStory = app.loadFilmStory()!
+oldStory.phase = "needs_attention";oldStory.approvedHash = "historical";oldStory.approvedAt = "then"
+app.saveFilmStory(oldStory)
+for i in app.ledger.rows.indices where app.ledger.rows[i].state == "running" { app.ledger.rows[i].state = "failed" }
+let finalScript = "RUNTIME_SECONDS: 160\nComplete sequence-by-sequence assembly\nEND"
+let finalHash = FilmStory.digest(finalScript)
+let researchID = app.storyTask("Review exact " + finalHash + "\n" + finalScript,seat:"research")
+let creativeID = app.storyTask("Confirm exact " + finalHash + "\n" + finalScript,seat:"creative")
+app.updateTask(researchID,state:"completed",summary:"Accepted")
+app.updateTask(creativeID,state:"completed",summary:"Confirmed")
+let acceptedJSON = String(data:try! JSONSerialization.data(withJSONObject:["script_sha256":finalHash,"decision":"accept","summary":"Complete story accepted","changes":[]]),encoding:.utf8)!
+app.saveResult(researchID,title:"",director:"",text:acceptedJSON)
+app.saveResult(creativeID,title:"",director:"",text:"CREATIVE_ACCEPTS_STORY\nSCREENPLAY_SHA256: " + finalHash)
+let adoption = ReviewedStoryAdoption(storyID:oldStory.id,previousHash:oldStory.hash,script:finalScript,scriptHash:finalHash,researchTaskID:researchID,creativeTaskID:creativeID)
+let untouched = try! Data(contentsOf:app.filmStoryURL)
+var badAdoption = adoption
+badAdoption = ReviewedStoryAdoption(storyID:oldStory.id,previousHash:oldStory.hash,script:finalScript+"changed",scriptHash:finalHash,researchTaskID:researchID,creativeTaskID:creativeID)
+assert(!app.adoptReviewedStory(badAdoption))
+app.updateTask(researchID,state:"running",summary:"Still reviewing")
+assert(!app.adoptReviewedStory(adoption))
+app.updateTask(researchID,state:"completed",summary:"Accepted")
+app.saveResult(creativeID,title:"",director:"",text:"CREATIVE_ACCEPTS_STORY\nSCREENPLAY_SHA256: wrong")
+assert(!app.adoptReviewedStory(adoption))
+app.saveResult(creativeID,title:"",director:"",text:"CREATIVE_ACCEPTS_STORY\nSCREENPLAY_SHA256: " + finalHash)
+app.saveResult(researchID,title:"",director:"",text:acceptedJSON.replacingOccurrences(of:finalHash,with:"stale"))
+assert(!app.adoptReviewedStory(adoption))
+assert(try! Data(contentsOf:app.filmStoryURL) == untouched)
+app.saveResult(researchID,title:"",director:"",text:acceptedJSON)
+app.saveResult(creativeID,title:"",director:"",text:"CREATIVE_ACCEPTS_STORY\nSCREENPLAY_SHA256: " + finalHash + "\nBut I do not accept the ending.")
+assert(!app.adoptReviewedStory(adoption))
+app.saveResult(creativeID,title:"",director:"",text:"# Creative result\n\nCreative Director · timestamp\n\n---\n\nCREATIVE_ACCEPTS_STORY\nSCREENPLAY_SHA256: " + finalHash + "\n")
+let dispatchedBeforeAdoption = app.dispatched.count
+assert(app.adoptReviewedStory(adoption))
+let proposed = app.loadFilmStory()!
+assert(proposed.phase == "awaiting_approval" && proposed.script == finalScript && proposed.hash == finalHash)
+assert(proposed.viewedHash.isEmpty && proposed.approvedHash.isEmpty && proposed.approvedAt.isEmpty)
+assert(!proposed.canApprove(finalHash))
+assert(proposed.brief == oldStory.brief && proposed.ownerRevisionFeedback == oldStory.ownerRevisionFeedback)
+assert(app.dispatched.count == dispatchedBeforeAdoption)
+assert(!app.adoptReviewedStory(adoption))
+assert(FileManager.default.fileExists(atPath:app.support.appendingPathComponent("reviewed-story-history/" + adoption.id + "/previous-story.json").path))
+print("PASS: reviewed adoption rejects stale/incomplete/unbound evidence, archives history, awaits unread owner approval and never renders")

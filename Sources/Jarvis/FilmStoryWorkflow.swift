@@ -96,15 +96,55 @@ extension JarvisApp {
             }
             story.phase = "awaiting_approval";story.taskID = story.id
             guard saveFilmStory(story) else { return }
-            saveResult(story.id,title:"Film storyline for your approval",director:"Jarvis · Creative and Research",text:story.script + "\n\nCONSULTATION RECORD\n\n" + story.history.joined(separator:"\n\n"))
-            var records = ledger.load();let now = TaskLedger.timestamp()
-            let approval = TaskRecord(id:story.id,state:"proposed",verified:false,owner:"creative",createdAt:now,updatedAt:now,resultSummary:"Creative and Research agree. Open the screenplay, then approve this exact story or request revisions. Approval starts film production from that exact screenplay.",title:"Film storyline — awaiting your approval")
-            if let i = records.firstIndex(where:{$0.id == story.id}) { records[i] = approval } else { records.insert(approval,at:0) }
-            publishTasks(records)
-            showWorkspace();openResult(story.id)
-            say("Creative and Research have agreed on a storyline. I've put the full screenplay in Results. Please review it; I will start production only if you approve it.")
+            presentReviewedStory(story,open:true)
         default: break
         }
+    }
+    func presentReviewedStory(_ story: FilmStory, open: Bool) {
+        saveResult(story.id,title:"Film storyline for your approval",director:"Jarvis · Creative and Research",text:story.script + "\n\nCONSULTATION RECORD\n\n" + story.history.joined(separator:"\n\n"))
+        var records = ledger.load();let now = TaskLedger.timestamp()
+        let approval = TaskRecord(id:story.id,state:"proposed",verified:false,owner:"creative",createdAt:now,updatedAt:now,resultSummary:"Creative and Research agree. Open the screenplay, then approve this exact story or request revisions. Approval starts film production from that exact screenplay.",title:"Film storyline — awaiting your approval")
+        if let i = records.firstIndex(where:{$0.id == story.id}) { records[i] = approval } else { records.insert(approval,at:0) }
+        publishTasks(records)
+        if open { showWorkspace();openResult(story.id) }
+        say("Creative and Research have agreed on a storyline. I've put the full screenplay in Results. Please review it; I will start production only if you approve it.")
+    }
+    /// Adopt completed, exact-version director reviews; this never authorizes production.
+    @discardableResult func adoptReviewedStory(_ request: ReviewedStoryAdoption) -> Bool {
+        guard UUID(uuidString:request.id) != nil,var story = loadFilmStory(), story.id == request.storyID,story.hash == request.previousHash,
+              ["needs_attention","production_needs_attention","completed","awaiting_approval"].contains(story.phase),
+              FilmStory.digest(request.script) == request.scriptHash else { return false }
+        var candidate = story;candidate.script = request.script
+        guard candidate.runtime != nil else { return false }
+        let records = ledger.load()
+        guard !records.contains(where:{$0.state == "running"}),
+              let research = records.first(where:{$0.id == request.researchTaskID && $0.owner == "research" && $0.state == "completed"}),
+              let creative = records.first(where:{$0.id == request.creativeTaskID && $0.owner == "creative" && $0.state == "completed"}),
+              research.instructions.contains(request.script),research.instructions.contains(request.scriptHash),
+              creative.instructions.contains(request.script),creative.instructions.contains(request.scriptHash),
+              let researchFile = resultFile(research.id),let creativeFile = resultFile(creative.id),
+              let researchRaw = try? String(contentsOf:researchFile,encoding:.utf8),
+              let creativeRaw = try? String(contentsOf:creativeFile,encoding:.utf8),
+              let review = StoryReview.parse(FilmStory.consultationText(researchRaw),hash:request.scriptHash),review.decision == "accept" else { return false }
+        let creativeBody = creativeRaw.range(of:"\n---\n\n").map { String(creativeRaw[$0.upperBound...]) } ?? creativeRaw
+        let lines = FilmStory.consultationText(creativeBody).components(separatedBy:.newlines).map{$0.trimmingCharacters(in:.whitespacesAndNewlines)}.filter{!$0.isEmpty}
+        guard lines == ["CREATIVE_ACCEPTS_STORY","SCREENPLAY_SHA256: " + request.scriptHash] else { return false }
+        let archive = support.appendingPathComponent("reviewed-story-history/" + request.id)
+        do {
+            try FileManager.default.createDirectory(at:archive,withIntermediateDirectories:true)
+            try JSONEncoder().encode(story).write(to:archive.appendingPathComponent("previous-story.json"),options:.atomic)
+            try JSONEncoder().encode(request).write(to:archive.appendingPathComponent("request.json"),options:.atomic)
+            try Data(researchRaw.utf8).write(to:archive.appendingPathComponent("research-result.md"),options:.atomic)
+            try Data(creativeRaw.utf8).write(to:archive.appendingPathComponent("creative-result.md"),options:.atomic)
+        } catch { return false }
+        if !story.approvedHash.isEmpty { story.history.append("Historical approval: " + story.approvedHash + " at " + story.approvedAt) }
+        story.history.append("Completed full-version Research " + research.id + "\n" + researchRaw)
+        story.history.append("Completed full-version Creative " + creative.id + "\n" + creativeRaw)
+        story.script = request.script;story.hash = request.scriptHash;story.phase = "awaiting_approval";story.taskID = story.id
+        story.viewedHash = "";story.approvedHash = "";story.approvedAt = "";story.feedback = review.report
+        guard saveFilmStory(story) else { return false }
+        presentReviewedStory(story,open:false)
+        return true
     }
     /// Resume one durable consultation instead of spawning disconnected rewrites on every repeated request.
     func resumeSavedFilmStory() -> String {
@@ -192,6 +232,11 @@ extension JarvisApp {
 
     /// Poll a user-owned local inbox, independent of WebKit readiness or screen lock.
     func consumeStoryRevisionRequests() {
+        let adoptionInbox = support.appendingPathComponent("reviewed-story-inbox")
+        for file in (try? FileManager.default.contentsOfDirectory(at:adoptionInbox,includingPropertiesForKeys:nil)) ?? [] {
+            guard file.pathExtension == "json",let data = try? Data(contentsOf:file),let request = try? JSONDecoder().decode(ReviewedStoryAdoption.self,from:data) else { continue }
+            if adoptReviewedStory(request) { try? FileManager.default.removeItem(at:file) }
+        }
         let inbox = support.appendingPathComponent("story-revision-inbox")
         let files = (try? FileManager.default.contentsOfDirectory(at:inbox,includingPropertiesForKeys:nil)) ?? []
         for file in files.filter({$0.pathExtension == "json"}).sorted(by:{$0.lastPathComponent < $1.lastPathComponent}) {

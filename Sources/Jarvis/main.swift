@@ -4,7 +4,19 @@ import AVFoundation
 import Speech
 
 
-if let index = CommandLine.arguments.firstIndex(of:"--story-revision-request") ?? CommandLine.arguments.firstIndex(of:"--director-writing-request") {
+if let index = CommandLine.arguments.firstIndex(of:"--adopt-reviewed-story") {
+    guard CommandLine.arguments.indices.contains(index+3) else { print("Usage: --adopt-reviewed-story script.md research-task-id creative-task-id");exit(2) }
+    let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Jarvis")
+    do {
+        let script = try String(contentsOfFile:CommandLine.arguments[index+1],encoding:.utf8)
+        let story = try JSONDecoder().decode(FilmStory.self,from:Data(contentsOf:support.appendingPathComponent("film-story.json")))
+        let request = ReviewedStoryAdoption(storyID:story.id,previousHash:story.hash,script:script,scriptHash:FilmStory.digest(script),researchTaskID:CommandLine.arguments[index+2],creativeTaskID:CommandLine.arguments[index+3])
+        let inbox = support.appendingPathComponent("reviewed-story-inbox")
+        try FileManager.default.createDirectory(at:inbox,withIntermediateDirectories:true)
+        try JSONEncoder().encode(request).write(to:inbox.appendingPathComponent(request.id + ".json"),options:.atomic)
+        print("Queued director-reviewed story for validation: " + request.id + ". This does not approve or render it.")
+    } catch { print("Could not queue reviewed story: " + error.localizedDescription);exit(2) }
+} else if let index = CommandLine.arguments.firstIndex(of:"--story-revision-request") ?? CommandLine.arguments.firstIndex(of:"--director-writing-request") {
     let workshop = CommandLine.arguments[index] == "--director-writing-request"
     let fileIndex = index + (workshop ? 2 : 1)
     let seat = workshop && CommandLine.arguments.indices.contains(index+1) ? CommandLine.arguments[index+1] : ""

@@ -64,3 +64,13 @@ struct StoryRevisionRequest: Codable {
     let feedback: String
     var writingSeat: String? = nil
 }
+
+struct ReviewedStoryAdoption: Codable {
+    var id = UUID().uuidString
+    let storyID: String
+    let previousHash: String
+    let script: String
+    let scriptHash: String
+    let researchTaskID: String
+    let creativeTaskID: String
+}
