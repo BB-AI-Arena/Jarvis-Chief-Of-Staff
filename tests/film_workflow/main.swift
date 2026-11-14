@@ -197,3 +197,14 @@ assert(app.dispatched.count == dispatchBeforeExternal && !externallyApproved.can
 assert(!app.recordExternalStoryApproval(external))
 assert(externallyApproved.history.contains(where:{$0.contains(external.sourceChatID) && $0.contains("No UI view was asserted")}))
 print("PASS: exact owner-chat approval records provenance without faking a UI read or launching rendering")
+
+// A targeted post-delivery edit consultation does not rewrite an approved screenplay.
+let approvedBytes = try! Data(contentsOf:app.filmStoryURL)
+let editRequest = StoryRevisionRequest(storyID:externallyApproved.id,expectedHash:externallyApproved.hash,feedback:"Targeted edit consultation: reveal the actual app sooner; preserve accepted story.",writingSeat:"creative")
+try! JSONEncoder().encode(editRequest).write(to:inbox.appendingPathComponent(editRequest.id + ".json"))
+app.consumeStoryRevisionRequests()
+assert(try! Data(contentsOf:app.filmStoryURL) == approvedBytes)
+assert(app.ledger.rows.contains(where:{$0.owner == "creative" && $0.instructions.contains(editRequest.feedback)}))
+assert(!app.canReviseFilmStory(app.loadFilmStory()!))
+assert(!app.loadFilmStory()!.canRender(task:app.loadFilmStory()!.taskID))
+print("PASS: approved-script targeted consultation preserves exact approval and cannot start wholesale rewrite or rendering")

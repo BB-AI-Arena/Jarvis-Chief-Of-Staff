@@ -264,7 +264,7 @@ extension JarvisApp {
         for file in files.filter({$0.pathExtension == "json"}).sorted(by:{$0.lastPathComponent < $1.lastPathComponent}) {
             guard let data = try? Data(contentsOf:file),let request = try? JSONDecoder().decode(StoryRevisionRequest.self,from:data),
                   UUID(uuidString:request.id) != nil,let story = loadFilmStory(),story.id == request.storyID,story.hash == request.expectedHash,
-                  (request.writingSeat == nil ? canReviseFilmStory(story) : (["creative","research"].contains(request.writingSeat!) && ["needs_attention","awaiting_approval","completed","production_needs_attention"].contains(story.phase))),
+                  (request.writingSeat == nil ? canReviseFilmStory(story) : (["creative","research"].contains(request.writingSeat!) && ["needs_attention","awaiting_approval","completed","production_needs_attention","approved"].contains(story.phase))),
                   !request.feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { continue }
             let archive = support.appendingPathComponent("story-revision-history/" + request.id)
             do {

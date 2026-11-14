@@ -37,7 +37,7 @@ if let index = CommandLine.arguments.firstIndex(of:"--record-story-approval") {
         guard !feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw NSError(domain:"StoryRevision",code:1) }
         let story = try JSONDecoder().decode(FilmStory.self,from:Data(contentsOf:support.appendingPathComponent("film-story.json")))
         let controller = JarvisApp()
-        guard workshop ? ["needs_attention","awaiting_approval","completed","production_needs_attention"].contains(story.phase) : controller.canReviseFilmStory(story) else { print("Story is busy or cannot be revised from its current phase.");exit(2) }
+        guard workshop ? ["needs_attention","awaiting_approval","completed","production_needs_attention","approved"].contains(story.phase) : controller.canReviseFilmStory(story) else { print("Story is busy or cannot be revised from its current phase.");exit(2) }
         let request = StoryRevisionRequest(storyID:story.id,expectedHash:story.hash,feedback:feedback,writingSeat:workshop ? seat : nil)
         let inbox = support.appendingPathComponent("story-revision-inbox")
         try FileManager.default.createDirectory(at:inbox,withIntermediateDirectories:true)
