@@ -73,6 +73,7 @@ struct ReviewedStoryAdoption: Codable {
     let scriptHash: String
     let researchTaskID: String
     let creativeTaskID: String
+    var rejectedFilmRoot: String? = nil
 }
 
 struct ExternalStoryApproval: Codable {

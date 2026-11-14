@@ -20,7 +20,7 @@ if let index = CommandLine.arguments.firstIndex(of:"--record-story-approval") {
     do {
         let script = try String(contentsOfFile:CommandLine.arguments[index+1],encoding:.utf8)
         let story = try JSONDecoder().decode(FilmStory.self,from:Data(contentsOf:support.appendingPathComponent("film-story.json")))
-        let request = ReviewedStoryAdoption(storyID:story.id,previousHash:story.hash,script:script,scriptHash:FilmStory.digest(script),researchTaskID:CommandLine.arguments[index+2],creativeTaskID:CommandLine.arguments[index+3])
+        let request = ReviewedStoryAdoption(storyID:story.id,previousHash:story.hash,script:script,scriptHash:FilmStory.digest(script),researchTaskID:CommandLine.arguments[index+2],creativeTaskID:CommandLine.arguments[index+3],rejectedFilmRoot:CommandLine.arguments.indices.contains(index+4) ? CommandLine.arguments[index+4] : nil)
         let inbox = support.appendingPathComponent("reviewed-story-inbox")
         try FileManager.default.createDirectory(at:inbox,withIntermediateDirectories:true)
         try JSONEncoder().encode(request).write(to:inbox.appendingPathComponent(request.id + ".json"),options:.atomic)

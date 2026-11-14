@@ -208,3 +208,38 @@ assert(app.ledger.rows.contains(where:{$0.owner == "creative" && $0.instructions
 assert(!app.canReviseFilmStory(app.loadFilmStory()!))
 assert(!app.loadFilmStory()!.canRender(task:app.loadFilmStory()!.taskID))
 print("PASS: approved-script targeted consultation preserves exact approval and cannot start wholesale rewrite or rendering")
+
+// Replacing an approved, externally delivered rejected film requires real owner evidence.
+let previousApproved = app.loadFilmStory()!
+let nextScript = "RUNTIME_SECONDS: 60\nActual app first, brief planned-feature preview\nEND"
+let nextHash = FilmStory.digest(nextScript)
+let rr = app.storyTask("Full " + nextHash + "\n" + nextScript,seat:"research")
+let cc = app.storyTask("Full " + nextHash + "\n" + nextScript,seat:"creative")
+app.updateTask(rr,state:"completed",summary:"Accept")
+app.updateTask(cc,state:"completed",summary:"Accept")
+app.saveResult(rr,title:"",director:"",text:acceptedJSON.replacingOccurrences(of:finalHash,with:nextHash))
+app.saveResult(cc,title:"",director:"",text:"CREATIVE_ACCEPTS_STORY\nSCREENPLAY_SHA256: " + nextHash)
+let missingEvidence = ReviewedStoryAdoption(storyID:previousApproved.id,previousHash:previousApproved.hash,script:nextScript,scriptHash:nextHash,researchTaskID:rr,creativeTaskID:cc)
+assert(!app.adoptReviewedStory(missingEvidence))
+let filmRoot = app.support.appendingPathComponent("completed-external-film")
+try! FileManager.default.createDirectory(at:filmRoot.appendingPathComponent("app-first-revision"),withIntermediateDirectories:true)
+func evidence(_ name:String,_ value:[String:Any]) { try! JSONSerialization.data(withJSONObject:value).write(to:filmRoot.appendingPathComponent(name)) }
+let deliveredID = UUID().uuidString
+app.ledger.rows.append(TaskRecord(id:deliveredID,state:"completed",verified:false,owner:"creative",createdAt:"then",updatedAt:"then",resultSummary:"Delivered",title:"Completed external film"))
+evidence("external-task.json",["id":deliveredID,"kind":"film"])
+evidence("job.json",["approved_sha256":"wrong"])
+let ownerChat = UUID().uuidString
+evidence("owner-film-review.json",["decision":"rejected_needs_revision","owner_feedback_verbatim":"Too slow; show the actual app.","source_chat":ownerChat])
+evidence("app-first-revision/owner-direction.json",["owner_answer_verbatim":"Actual app first; roughly 60 seconds.","source_chat":ownerChat,"exact_replacement_script_approval":"not_yet_given"])
+let replacement = ReviewedStoryAdoption(storyID:previousApproved.id,previousHash:previousApproved.hash,script:nextScript,scriptHash:nextHash,researchTaskID:rr,creativeTaskID:cc,rejectedFilmRoot:filmRoot.path)
+assert(!app.adoptReviewedStory(replacement))
+evidence("job.json",["approved_sha256":previousApproved.hash])
+let dispatchBeforeReplacement = app.dispatched.count
+assert(app.adoptReviewedStory(replacement))
+let replacementStory = app.loadFilmStory()!
+assert(replacementStory.phase == "awaiting_approval" && replacementStory.hash == nextHash)
+assert(replacementStory.approvedHash.isEmpty && replacementStory.viewedHash.isEmpty && replacementStory.approvedAt.isEmpty)
+assert(replacementStory.ownerRevisionFeedback!.contains("Actual app first"))
+assert(replacementStory.history.contains(where:{$0.contains(previousApproved.approvedHash)}))
+assert(app.dispatched.count == dispatchBeforeReplacement)
+print("PASS: completed rejected-film evidence enables a reviewed replacement only, preserving historical approval and requiring fresh owner approval")

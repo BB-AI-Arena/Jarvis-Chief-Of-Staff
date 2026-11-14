@@ -109,11 +109,35 @@ extension JarvisApp {
         if open { showWorkspace();openResult(story.id) }
         say("Creative and Research have agreed on a storyline. I've put the full screenplay in Results. Please review it; I will start production only if you approve it.")
     }
+    /// A historical approved script can be replaced only with completed-film and direct-owner revision evidence.
+    func rejectedFilmEvidence(_ root: String, story: FilmStory) -> (String, Data, Data)? {
+        let folder = URL(fileURLWithPath:root)
+        func readJSON(_ url: URL) -> [String:Any]? {
+            guard let data = try? Data(contentsOf:url) else { return nil }
+            return (try? JSONSerialization.jsonObject(with:data)) as? [String:Any]
+        }
+        guard story.approvedHash == story.hash,story.hash == FilmStory.digest(story.script),
+              let registration = readJSON(folder.appendingPathComponent("external-task.json")),registration["kind"] as? String == "film",
+              let id = registration["id"] as? String,UUID(uuidString:id) != nil,
+              ledger.load().contains(where:{$0.id == id && $0.owner == "creative" && $0.state == "completed"}),
+              let job = readJSON(folder.appendingPathComponent("job.json")),job["approved_sha256"] as? String == story.hash,
+              let rejectionData = try? Data(contentsOf:folder.appendingPathComponent("owner-film-review.json")),
+              let directionData = try? Data(contentsOf:folder.appendingPathComponent("app-first-revision/owner-direction.json")),
+              let rejection = try? JSONSerialization.jsonObject(with:rejectionData) as? [String:Any],
+              let direction = try? JSONSerialization.jsonObject(with:directionData) as? [String:Any],
+              rejection["decision"] as? String == "rejected_needs_revision",
+              let feedback = rejection["owner_feedback_verbatim"] as? String,!feedback.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+              let ownerDirection = direction["owner_answer_verbatim"] as? String,!ownerDirection.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+              let chat = rejection["source_chat"] as? String,UUID(uuidString:chat) != nil,direction["source_chat"] as? String == chat,
+              direction["exact_replacement_script_approval"] as? String == "not_yet_given" else { return nil }
+        return ("Latest owner revision direction from chat " + chat + ":\n" + ownerDirection + "\nOwner rejection of previous completed film:\n" + feedback,rejectionData,directionData)
+    }
     /// Adopt completed, exact-version director reviews; this never authorizes production.
     @discardableResult func adoptReviewedStory(_ request: ReviewedStoryAdoption) -> Bool {
         guard UUID(uuidString:request.id) != nil,var story = loadFilmStory(), story.id == request.storyID,story.hash == request.previousHash,
-              ["needs_attention","production_needs_attention","completed","awaiting_approval"].contains(story.phase),
-              FilmStory.digest(request.script) == request.scriptHash else { return false }
+              FilmStory.digest(request.script) == request.scriptHash,request.scriptHash != story.hash else { return false }
+        let replacement = request.rejectedFilmRoot.flatMap { rejectedFilmEvidence($0,story:story) }
+        guard ["needs_attention","production_needs_attention","completed","awaiting_approval"].contains(story.phase) || (story.phase == "approved" && replacement != nil) else { return false }
         var candidate = story;candidate.script = request.script
         guard candidate.runtime != nil else { return false }
         let records = ledger.load()
@@ -136,8 +160,17 @@ extension JarvisApp {
             try JSONEncoder().encode(request).write(to:archive.appendingPathComponent("request.json"),options:.atomic)
             try Data(researchRaw.utf8).write(to:archive.appendingPathComponent("research-result.md"),options:.atomic)
             try Data(creativeRaw.utf8).write(to:archive.appendingPathComponent("creative-result.md"),options:.atomic)
+            if let replacement {
+                try replacement.1.write(to:archive.appendingPathComponent("owner-film-review.json"),options:.atomic)
+                try replacement.2.write(to:archive.appendingPathComponent("owner-direction.json"),options:.atomic)
+            }
         } catch { return false }
         if !story.approvedHash.isEmpty { story.history.append("Historical approval: " + story.approvedHash + " at " + story.approvedAt) }
+        if let replacement {
+            if let previousDirection = story.ownerRevisionFeedback { story.history.append("Previous revision direction retained: \n" + previousDirection) }
+            story.ownerRevisionFeedback = replacement.0
+            story.history.append(replacement.0)
+        }
         story.history.append("Completed full-version Research " + research.id + "\n" + researchRaw)
         story.history.append("Completed full-version Creative " + creative.id + "\n" + creativeRaw)
         story.script = request.script;story.hash = request.scriptHash;story.phase = "awaiting_approval";story.taskID = story.id
